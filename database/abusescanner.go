@@ -54,9 +54,12 @@ type (
 
 	// AbuseEmail represent an object in the emails collection.
 	AbuseEmail struct {
-		ID   primitive.ObjectID `bson:"_id"`
-		UID  string             `bson:"email_uid"`
-		Body []byte             `bson:"email_body"`
+		ID      primitive.ObjectID `bson:"_id"`
+		UID     string             `bson:"email_uid"`
+		UIDRaw  uint32             `bson:"email_uid_raw"`
+		Body    []byte             `bson:"email_body"`
+		From    string             `bson:"email_from"`
+		Subject string             `bson:"email_subject"`
 
 		// fields set by parser
 		ParsedAt    time.Time   `bson:"parsed_at"`
@@ -94,6 +97,37 @@ type (
 		staticPortalHostname string
 	}
 )
+
+// String returns a string representation of the abuse email
+func (a AbuseEmail) String() string {
+	var sb strings.Builder
+	sb.WriteString("Email Info:\n")
+	sb.WriteString(fmt.Sprintf("Original From: %v\n", a.From))
+	sb.WriteString(fmt.Sprintf("Original Subject: %v\n", a.From))
+
+	pr := a.ParseResult
+	sb.WriteString("\nParse Result:\n")
+	sb.WriteString(fmt.Sprintf("Reporter Name: %v\n", pr.Reporter.Name))
+	sb.WriteString(fmt.Sprintf("Reporter Email: %v\n", pr.Reporter.Email))
+	sb.WriteString("\nTags:\n")
+	for _, tag := range pr.Tags {
+		sb.WriteString(tag + "\n")
+	}
+
+	sb.WriteString("\nSkylinks:\n")
+	for i, skylink := range pr.Skylinks {
+		var blocked string
+		var blockedErr string
+		if a.BlockResult[i] == "OK" {
+			blocked = "BLOCKED | "
+		} else {
+			blocked = "NOT BLOCKED | "
+			blockedErr = a.BlockResult[i]
+		}
+		sb.WriteString(fmt.Sprintf("%v %v %v\n", blocked, skylink, blockedErr))
+	}
+	return sb.String()
+}
 
 // NewAbuseScannerDB returns an instance of the Mongo DB.
 func NewAbuseScannerDB(ctx context.Context, connectionString, portalHostName string, logger *logrus.Logger) (*AbuseScannerDB, error) {
@@ -142,6 +176,14 @@ func NewAbuseScannerDB(ctx context.Context, connectionString, portalHostName str
 				Keys:    bson.D{{"email_uid", 1}},
 				Options: options.Index().SetUnique(true),
 			},
+			{
+				Keys:    bson.D{{"parsed", 1}},
+				Options: options.Index(),
+			},
+			{
+				Keys:    bson.D{{"blocked", 1}},
+				Options: options.Index(),
+			},
 		},
 	})
 	if err != nil {
@@ -182,6 +224,30 @@ func (db *AbuseScannerDB) FindUnblocked() ([]AbuseEmail, error) {
 	cursor, err := collEmails.Find(ctx, bson.M{"blocked": false})
 	if err != nil {
 		return nil, errors.AddContext(err, "could not retrieve unblocked emails")
+	}
+
+	var emails []AbuseEmail
+	err = cursor.All(context.Background(), &emails)
+	if err != nil {
+		db.staticLogger.Error("failed to parse emails", err)
+	}
+
+	return emails, nil
+}
+
+// FindUnfinalized returns the messages that have not been finalized.
+func (db *AbuseScannerDB) FindUnfinalized() ([]AbuseEmail, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
+	defer cancel()
+
+	collEmails := db.staticDatabase.Collection(collEmails)
+	cursor, err := collEmails.Find(ctx, bson.M{
+		"parsed":    true,
+		"blocked":   true,
+		"finalized": false,
+	})
+	if err != nil {
+		return nil, errors.AddContext(err, "could not retrieve unfinalized emails")
 	}
 
 	var emails []AbuseEmail

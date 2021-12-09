@@ -130,6 +130,12 @@ func (b *Blocker) threadedBlockMessages() {
 func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 	results := make([]string, len(report.Skylinks))
 	for i, skylink := range report.Skylinks {
+		// if there are no tags, we don't block
+		if len(report.Tags) == 0 {
+			results[i] = "NO_TAGS"
+			continue
+		}
+
 		// build the request
 		req, err := b.buildBlockRequest(skylink, report.Reporter, report.Tags)
 		if err != nil {
@@ -192,7 +198,7 @@ func (b *Blocker) buildBlockRequest(skylink string, reporter database.AbuseRepor
 	// add the headers
 	//
 	// TODO: we don't even need the auth header here seeing as we removed
-	// authenitcation from that route in the blocker API, I left it here anyway
+	// authentication from that route in the blocker API, I left it here anyway
 	// as we might bring that back in the future
 	req.Header.Set("User-Agent", "Sia-Agent")
 	req.Header.Set("Authorization", b.staticBlockerAuthHeader)

@@ -57,6 +57,7 @@ func (f *Fetcher) Start() error {
 	// check whether the mailbox exists
 	found := false
 	for _, m := range mailboxes {
+		fmt.Println("mailbox ", m)
 		if m == f.staticMailbox {
 			found = true
 			break
@@ -124,7 +125,7 @@ func (f *Fetcher) threadedFetchMessages() {
 
 		// get all message ids
 		logger.Debugln("Listing messages...")
-		msgs, err := f.getMessageIDMap()
+		msgs, err := f.getMessageIds()
 		if err != nil {
 			logger.Errorf("Failed listing messages, error %v", err)
 		}
@@ -140,28 +141,24 @@ func (f *Fetcher) threadedFetchMessages() {
 
 		// fetch messages
 		for _, msgUid := range missing {
-			if msgUid != 1900 {
-				continue
-			}
 			seqSet := new(imap.SeqSet)
 			seqSet.AddNum(msgUid)
 			err := f.fetchMessages(mailbox, seqSet)
 			if err != nil {
 				logger.Errorf("Failed fetching message %v, error %v", msgUid, err)
 			}
+			break
 		}
 	}
 }
 
-// getMessageIDMap lists all messages in the current mailbox and returns a map
-// of sequence numbers to email MessageID
-func (f *Fetcher) getMessageIDMap() (messageIDMap, error) {
+// getMessageIds lists all messages in the current mailbox
+func (f *Fetcher) getMessageIds() ([]uint32, error) {
 	// convenience variables
 	email := f.staticEmailClient
 	logger := f.staticLogger
 
 	// construct seq set
-	emails := make(messageIDMap)
 	seqset, err := imap.ParseSeqSet("1:*")
 	if err != nil {
 		return nil, err
@@ -177,23 +174,24 @@ func (f *Fetcher) getMessageIDMap() (messageIDMap, error) {
 	}()
 
 	// build the map
+	var ids []uint32
 	for msg := range messageChan {
-		emails[msg.Uid] = msg.SeqNum
+		ids = append(ids, msg.Uid)
 	}
-	return emails, nil
+	return ids, nil
 }
 
 // getMessagesToFetch returns which messages are not in our database
 //
 // TODO: improve performance, there's no need to do N findOne's
-func (f *Fetcher) getMessagesToFetch(mailbox *imap.MailboxStatus, msgs messageIDMap) ([]uint32, error) {
+func (f *Fetcher) getMessagesToFetch(mailbox *imap.MailboxStatus, msgs []uint32) ([]uint32, error) {
 	// convenience variables
 	database := f.staticDatabase
 	logger := f.staticLogger
 
 	// create an array to hold the messages that are missing
 	toFetch := make([]uint32, 0, len(msgs))
-	for msgUid := range msgs {
+	for _, msgUid := range msgs {
 		uid := buildMessageUID(mailbox, msgUid)
 		email, err := database.FindOne(uid)
 		if err != nil {
@@ -219,11 +217,11 @@ func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSe
 	section := &imap.BodySectionName{}
 	done := make(chan error, 1)
 	go func() {
-		done <- email.UidFetch(toFetch, []imap.FetchItem{imap.FetchBody, section.FetchItem()}, messageChan)
+		done <- email.UidFetch(toFetch, []imap.FetchItem{imap.FetchBody, section.FetchItem(), imap.FetchEnvelope}, messageChan)
 	}()
 
 	for msg := range messageChan {
-		fmt.Println("received msg", msg.Uid)
+		fmt.Println(msg.Envelope.Subject, msg.Envelope.Sender[0].Address())
 		err := f.persistMessage(mailbox, msg)
 		if err != nil {
 			logger.Errorf("Failed to persist %v, error: %v\n", msg.SeqNum, err)
@@ -256,11 +254,20 @@ func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message)
 		return errors.AddContext(err, "could not read msg body")
 	}
 
+	// parse the 'from'
+	from := "unknown"
+	if len(msg.Envelope.From) > 0 {
+		from = msg.Envelope.From[0].Address()
+	}
+
 	// create the email entity from the message
 	email := database.AbuseEmail{
-		ID:   primitive.NewObjectID(),
-		UID:  uid,
-		Body: body,
+		ID:      primitive.NewObjectID(),
+		UID:     uid,
+		UIDRaw:  msg.Uid,
+		Body:    body,
+		From:    from,
+		Subject: msg.Envelope.Subject,
 
 		Parsed:    false,
 		Blocked:   false,

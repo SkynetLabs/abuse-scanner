@@ -7,6 +7,9 @@ import (
 const (
 	// MailboxInbox is the name of the inbox
 	MailboxInbox = "INBOX"
+
+	// MailboxAbuseScanner is the name of the Abuse Scanner folder
+	MailboxAbuseScanner = "Abuse Scanner"
 )
 
 // NewClient returns an authenticated email client
