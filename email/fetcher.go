@@ -17,7 +17,7 @@ import (
 
 const (
 	// fetchFrequency defines the frequency with which we fetch new emails
-	fetchFrequency = 30 * time.Second
+	fetchFrequency = 10 * time.Second
 )
 
 type (

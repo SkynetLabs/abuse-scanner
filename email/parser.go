@@ -17,7 +17,7 @@ import (
 const (
 	// parseFrequency defines the frequency with which the parser looks for
 	// emails to be parsed
-	parseFrequency = 15 * time.Second
+	parseFrequency = 10 * time.Second
 )
 
 var (

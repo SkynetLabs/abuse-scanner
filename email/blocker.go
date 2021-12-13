@@ -16,7 +16,7 @@ import (
 
 const (
 	// blockFrequency defines the frequency with which we block skylinks
-	blockFrequency = 30 * time.Second
+	blockFrequency = 10 * time.Second
 )
 
 type (

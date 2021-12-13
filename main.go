@@ -72,8 +72,8 @@ func main() {
 
 	// create a new mail fetcher
 	logger.Info("Initializing email fetcher...")
-	d := email.NewFetcher(ctx, db, mail, email.MailboxInbox, logger)
-	err = d.Start()
+	f := email.NewFetcher(ctx, db, mail, email.MailboxInbox, logger)
+	err = f.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email fetcher", err)
 		return
@@ -99,12 +99,12 @@ func main() {
 
 	// create a new finalizer
 	logger.Info("Initializing finalizer...")
-	f := email.NewFinalizer(ctx, db, mail, email.MailboxInbox, email.MailboxAbuseScanner, logger)
-	err = f.Start()
-	if err != nil {
-		log.Fatal("Failed to start the email finalizer", err)
-		return
-	}
+	_ = email.NewFinalizer(ctx, db, mail, email.MailboxInbox, email.MailboxAbuseScanner, logger)
+	// err = f.Start()
+	// if err != nil {
+	// 	log.Fatal("Failed to start the email finalizer", err)
+	// 	return
+	// }
 
 	exitSignal := make(chan os.Signal)
 	signal.Notify(exitSignal, syscall.SIGINT, syscall.SIGTERM)
