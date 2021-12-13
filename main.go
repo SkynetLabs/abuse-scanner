@@ -20,7 +20,7 @@ func main() {
 	_ = godotenv.Load()
 
 	// create a context
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// fetch env variables
@@ -50,7 +50,7 @@ func main() {
 	logger.SetFormatter(formatter)
 
 	// create a database client
-	db, err := database.NewAbuseScannerDB(ctx, mongoConnectionString, "localhost", logger)
+	db, err := database.NewAbuseScannerDB(mongoConnectionString, "localhost", logger)
 	if err != nil {
 		log.Fatal("Failed to initialize database client", err)
 	}
@@ -93,22 +93,24 @@ func main() {
 	b := email.NewBlocker(ctx, blockerAuthHeader, blockerApiUrl, db, logger)
 	err = b.Start()
 	if err != nil {
-		log.Fatal("Failed to start the email parser", err)
+		log.Fatal("Failed to start the blocker", err)
 		return
 	}
 
 	// create a new finalizer
 	logger.Info("Initializing finalizer...")
-	s := email.NewFinalizer(ctx, db, mail, email.MailboxInbox, email.MailboxAbuseScanner, logger)
-	err = s.Start()
+	ff := email.NewFinalizer(ctx, db, mail, email.MailboxInbox, email.MailboxAbuseScanner, logger)
+	err = ff.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email finalizer", err)
 		return
 	}
 
-	exitSignal := make(chan os.Signal)
+	// catch exit signals
+	exitSignal := make(chan os.Signal, 1)
 	signal.Notify(exitSignal, syscall.SIGINT, syscall.SIGTERM)
 	<-exitSignal
 
-	logger.Info("Terminated.")
+	time.Sleep(time.Second)
+	logger.Info("Abuse Scanner Terminated.")
 }

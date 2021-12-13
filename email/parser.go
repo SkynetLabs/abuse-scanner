@@ -17,7 +17,7 @@ import (
 const (
 	// parseFrequency defines the frequency with which the parser looks for
 	// emails to be parsed
-	parseFrequency = 10 * time.Second
+	parseFrequency = 30 * time.Second
 )
 
 var (
@@ -68,6 +68,7 @@ func (p *Parser) threadedParseMessages() {
 		if !first {
 			select {
 			case <-p.staticContext.Done():
+				logger.Info("Parser context done")
 				return
 			case <-time.After(parseFrequency):
 			}

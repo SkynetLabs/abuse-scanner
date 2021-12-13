@@ -17,7 +17,7 @@ import (
 
 const (
 	// fetchFrequency defines the frequency with which we fetch new emails
-	fetchFrequency = 10 * time.Second
+	fetchFrequency = 30 * time.Second
 )
 
 type (
@@ -109,6 +109,7 @@ func (f *Fetcher) threadedFetchMessages() {
 		if !first {
 			select {
 			case <-f.staticContext.Done():
+				logger.Debugln("Fetcher context done")
 				return
 			case <-time.After(fetchFrequency):
 			}

@@ -14,7 +14,7 @@ import (
 
 const (
 	// finalizeFrequency defines the frequency with which we finalize reports
-	finalizeFrequency = 10 * time.Second
+	finalizeFrequency = 30 * time.Second
 )
 
 type (
@@ -64,6 +64,7 @@ func (f *Finalizer) threadedFinalizeMessages() {
 		if !first {
 			select {
 			case <-f.staticContext.Done():
+				logger.Debugln("Finalizer context done")
 				return
 			case <-time.After(finalizeFrequency):
 			}

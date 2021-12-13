@@ -16,7 +16,7 @@ import (
 
 const (
 	// blockFrequency defines the frequency with which we block skylinks
-	blockFrequency = 10 * time.Second
+	blockFrequency = 30 * time.Second
 )
 
 type (
@@ -70,6 +70,7 @@ func (b *Blocker) threadedBlockMessages() {
 		if !first {
 			select {
 			case <-b.staticContext.Done():
+				logger.Debugln("Blocker context done")
 				return
 			case <-time.After(blockFrequency):
 			}
