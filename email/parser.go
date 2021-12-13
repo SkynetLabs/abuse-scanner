@@ -27,8 +27,8 @@ var (
 )
 
 type (
-	// Fetcher is an object that will periodically scan an inbox and persist the
-	// missing messages in the database.
+	// Parser is an object that will periodically scan for unparsed emails and
+	// parse them for skylinks.
 	Parser struct {
 		staticContext  context.Context
 		staticDatabase *database.AbuseScannerDB
@@ -37,7 +37,7 @@ type (
 	}
 )
 
-// NewFetcher creates a new parser.
+// NewParser creates a new parser.
 func NewParser(ctx context.Context, database *database.AbuseScannerDB, sponsor string, logger *logrus.Logger) *Parser {
 	return &Parser{
 		staticContext:  ctx,
@@ -173,16 +173,22 @@ func extractSkylinks(emailBody string) []string {
 		}
 	}
 
-	// range over the potential skylinks and validate it by using the
-	// 'LoadString' method
-	var skylinks []string
+	// dedupe skylinks and validate them using `LoadString`
+	skylinksMap := make(map[string]struct{}, 0)
 	for _, maybeSkylink := range maybeSkylinks {
 		var sl skymodules.Skylink
 		err := sl.LoadString(maybeSkylink)
 		if err == nil {
-			skylinks = append(skylinks, sl.String())
+			skylinksMap[sl.String()] = struct{}{}
 		}
 	}
+
+	// turn the skylinks map in an array
+	var skylinks []string
+	for skylink := range skylinksMap {
+		skylinks = append(skylinks, skylink)
+	}
+
 	return skylinks
 }
 

@@ -147,7 +147,6 @@ func (f *Fetcher) threadedFetchMessages() {
 			if err != nil {
 				logger.Errorf("Failed fetching message %v, error %v", msgUid, err)
 			}
-			break
 		}
 	}
 }
@@ -221,7 +220,6 @@ func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSe
 	}()
 
 	for msg := range messageChan {
-		fmt.Println(msg.Envelope.Subject, msg.Envelope.Sender[0].Address())
 		err := f.persistMessage(mailbox, msg)
 		if err != nil {
 			logger.Errorf("Failed to persist %v, error: %v\n", msg.SeqNum, err)

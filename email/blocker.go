@@ -51,7 +51,6 @@ func NewBlocker(ctx context.Context, blockerAuthHeader, blockerApiUrl string, da
 
 // Start initializes the blocker process.
 func (b *Blocker) Start() error {
-	// TOOD: call out to blocker API health check
 	go b.threadedBlockMessages()
 	return nil
 }

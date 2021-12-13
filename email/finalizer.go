@@ -89,6 +89,10 @@ func (f *Finalizer) threadedFinalizeMessages() {
 
 		// loop all emails and parse them
 		for _, email := range toFinalize {
+			if len(email.BlockResult) != len(email.ParseResult.Skylinks) {
+				logger.Debugf("Found mismatching blockresult and parseresult length, %v != %v, email with id %v\n", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
+				continue
+			}
 			err = func() (err error) {
 				lock := abuseDB.NewLock(email.UID)
 				err = lock.Lock()
