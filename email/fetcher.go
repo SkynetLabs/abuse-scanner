@@ -57,7 +57,6 @@ func (f *Fetcher) Start() error {
 	// check whether the mailbox exists
 	found := false
 	for _, m := range mailboxes {
-		fmt.Println("mailbox ", m)
 		if m == f.staticMailbox {
 			found = true
 			break

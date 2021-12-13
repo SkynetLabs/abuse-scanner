@@ -44,12 +44,6 @@ func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailC
 
 // Start initializes the finalization process.
 func (f *Finalizer) Start() error {
-	// select the mailbox
-	// _, err := f.staticEmailClient.Select(f.staticMailboxSrc, false)
-	// if err != nil {
-	// 	return errors.AddContext(err, fmt.Sprintf("Failed selecting mailbox '%v'", f.staticMailboxSrc))
-	// }
-
 	go f.threadedFinalizeMessages()
 	return nil
 }

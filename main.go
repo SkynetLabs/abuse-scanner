@@ -30,8 +30,8 @@ func main() {
 	mongoConnectionString := os.Getenv("MONGO_CONNECTIONSTRING")
 	blockerApiUrl := os.Getenv("BLOCKER_API_URL")
 	blockerAuthHeader := os.Getenv("BLOCKER_AUTH_HEADER")
-	sponsor := os.Getenv("SKYNET_ABUSE_SPONSOR")
-	loglevel := os.Getenv("LOG_LEVEL")
+	sponsor := os.Getenv("ABUSE_SPONSOR")
+	loglevel := os.Getenv("ABUSE_LOG_LEVEL")
 
 	// initialize a logger
 	logger := logrus.New()

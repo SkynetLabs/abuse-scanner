@@ -142,11 +142,8 @@ func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 			continue
 		}
 
-		// TODO: do not execute the block request
-		results[i] = "OK"
-		continue
-
 		// execute the request
+		b.staticLogger.Debugf("blocking %v...", skylink)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			results[i] = fmt.Sprintf("failed to execute request, err: %v", err.Error())
@@ -166,6 +163,10 @@ func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 			}
 		}
 		resp.Body.Close()
+	}
+
+	if len(results) != len(report.Skylinks) {
+		b.staticLogger.Errorf("the result does not contain an entry for every skylink, %v != %v", len(results), len(report.Skylinks))
 	}
 
 	return results, nil
