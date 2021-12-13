@@ -154,6 +154,8 @@ func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 		switch resp.StatusCode {
 		case http.StatusOK:
 			results[i] = "OK"
+		case http.StatusNoContent:
+			results[i] = "OK_NO_CONTENT"
 		default:
 			respBody, err := ioutil.ReadAll(resp.Body)
 			if err != nil {

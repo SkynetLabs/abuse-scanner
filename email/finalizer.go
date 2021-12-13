@@ -14,7 +14,7 @@ import (
 
 const (
 	// finalizeFrequency defines the frequency with which we finalize reports
-	finalizeFrequency = 30 * time.Second
+	finalizeFrequency = 10 * time.Second
 )
 
 type (

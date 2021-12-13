@@ -147,7 +147,6 @@ func NewAbuseScannerDB(ctx context.Context, connectionString, portalHostName str
 	// get a database handler
 	database := client.Database(dbName)
 
-	fmt.Println("ensuring locks on db", dbName)
 	// ensure the locks collection
 	if database.Collection(collLocks) == nil {
 		fmt.Println("locks coll did not exist, creating...", collLocks)
@@ -167,6 +166,12 @@ func NewAbuseScannerDB(ctx context.Context, connectionString, portalHostName str
 		},
 		*lock.NewClient(database.Collection(collLocks)),
 		portalHostName,
+	}
+
+	// the lock client creates its own indices
+	err = db.CreateIndexes(ctx)
+	if err != nil {
+		return nil, errors.AddContext(err, "failed to create indices on locks")
 	}
 
 	// ensure the schema

@@ -99,12 +99,12 @@ func main() {
 
 	// create a new finalizer
 	logger.Info("Initializing finalizer...")
-	_ = email.NewFinalizer(ctx, db, mail, email.MailboxInbox, email.MailboxAbuseScanner, logger)
-	// err = f.Start()
-	// if err != nil {
-	// 	log.Fatal("Failed to start the email finalizer", err)
-	// 	return
-	// }
+	s := email.NewFinalizer(ctx, db, mail, email.MailboxInbox, email.MailboxAbuseScanner, logger)
+	err = s.Start()
+	if err != nil {
+		log.Fatal("Failed to start the email finalizer", err)
+		return
+	}
 
 	exitSignal := make(chan os.Signal)
 	signal.Notify(exitSignal, syscall.SIGINT, syscall.SIGTERM)
