@@ -23,11 +23,11 @@ that define whether a certain module has handled the email in question, e.g.
 
 ## Environment
 
+- ABUSE_LOG_LEVEL=
+- ABUSE_SPONSOR=
 - BLOCKER_API_URL=
 - BLOCKER_AUTH_HEADER=
 - EMAIL_SERVER=
 - EMAIL_USERNAME=
 - EMAIL_PASSWORD=
 - MONGO_CONNECTIONSTRING=
-- SKYNET_ABUSE_SPONSOR=
-- LOG_LEVEL=
