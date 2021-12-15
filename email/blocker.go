@@ -12,6 +12,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 const (
@@ -123,9 +124,14 @@ func (b *Blocker) threadedBlockMessages() {
 				}
 
 				// update the email
-				email.Blocked = true
-				email.BlockResult = result
-				err = abuseDB.UpdateNoLock(email)
+				err = abuseDB.UpdateNoLock(email,
+					bson.D{
+						{"$set", bson.D{
+							{"blocked", true},
+							{"blockResult", result},
+						}},
+					},
+				)
 				if err != nil {
 					return errors.AddContext(err, "could not update email")
 				}

@@ -11,6 +11,7 @@ import (
 	uuid "github.com/nu7hatch/gouuid"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 const (
@@ -116,8 +117,11 @@ func (f *Finalizer) threadedFinalizeMessages() {
 				}
 
 				// update the email
-				email.Finalized = true
-				err = abuseDB.UpdateNoLock(email)
+				err = abuseDB.UpdateNoLock(email, bson.D{
+					{"$set", bson.D{
+						{"finalized", true},
+					}},
+				})
 				if err != nil {
 					return errors.AddContext(err, "could not update email")
 				}

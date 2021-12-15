@@ -258,7 +258,11 @@ func (db *AbuseScannerDB) FindUnblocked() ([]AbuseEmail, error) {
 	defer cancel()
 
 	collEmails := db.staticDatabase.Collection(collEmails)
-	cursor, err := collEmails.Find(ctx, bson.M{"blocked": false})
+	cursor, err := collEmails.Find(ctx, bson.M{
+		"parsed":    true,
+		"blocked":   false,
+		"finalized": false,
+	})
 	if err != nil {
 		return nil, errors.AddContext(err, "could not retrieve unblocked emails")
 	}
@@ -302,7 +306,11 @@ func (db *AbuseScannerDB) FindUnparsed() ([]AbuseEmail, error) {
 	defer cancel()
 
 	collEmails := db.staticDatabase.Collection(collEmails)
-	cursor, err := collEmails.Find(ctx, bson.M{"parsed": false})
+	cursor, err := collEmails.Find(ctx, bson.M{
+		"parsed":    false,
+		"blocked":   false,
+		"finalized": false,
+	})
 	if err != nil {
 		return nil, errors.AddContext(err, "could not retrieve unparsed emails")
 	}
@@ -359,13 +367,13 @@ func (db *AbuseScannerDB) NewLock(emailUID string) *abuseEmailLock {
 
 // UpdateNoLock will update the given email, this method does not lock the given
 // email as it is expected for the caller to have acquired the lock.
-func (db *AbuseScannerDB) UpdateNoLock(email AbuseEmail) (err error) {
+func (db *AbuseScannerDB) UpdateNoLock(email AbuseEmail, update interface{}) (err error) {
 	// create a context with default timeout
 	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
 	defer cancel()
 
 	collEmails := db.staticDatabase.Collection(collEmails)
-	_, err = collEmails.ReplaceOne(ctx, bson.M{"email_uid": email.UID}, email)
+	_, err = collEmails.UpdateOne(ctx, bson.M{"email_uid": email.UID}, update)
 	if err != nil {
 		return err
 	}

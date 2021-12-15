@@ -12,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/SkynetLabs/skyd/skymodules"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 const (
@@ -115,9 +116,14 @@ func (p *Parser) threadedParseMessages() {
 				}
 
 				// update the email
-				email.Parsed = true
-				email.ParseResult = report
-				err = abuseDB.UpdateNoLock(email)
+				err = abuseDB.UpdateNoLock(email,
+					bson.D{
+						{"$set", bson.D{
+							{"parsed", true},
+							{"parseResult", report},
+						}},
+					},
+				)
 				if err != nil {
 					return errors.AddContext(err, "could not update email")
 				}
