@@ -24,20 +24,21 @@ func main() {
 	defer cancel()
 
 	// fetch env variables
+	abuseLoglevel := os.Getenv("ABUSE_LOG_LEVEL")
+	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
+	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
 	emailServer := os.Getenv("EMAIL_SERVER")
 	emailUsername := os.Getenv("EMAIL_USERNAME")
 	emailPassword := os.Getenv("EMAIL_PASSWORD")
 	mongoConnectionString := os.Getenv("MONGO_CONNECTIONSTRING")
 	blockerApiUrl := os.Getenv("BLOCKER_API_URL")
 	blockerAuthHeader := os.Getenv("BLOCKER_AUTH_HEADER")
-	sponsor := os.Getenv("ABUSE_SPONSOR")
-	loglevel := os.Getenv("ABUSE_LOG_LEVEL")
 
 	// initialize a logger
 	logger := logrus.New()
 
 	// configure log level
-	logLevel, err := logrus.ParseLevel(loglevel)
+	logLevel, err := logrus.ParseLevel(abuseLoglevel)
 	if err != nil {
 		logLevel = logrus.InfoLevel
 	}
@@ -72,7 +73,7 @@ func main() {
 
 	// create a new mail fetcher
 	logger.Info("Initializing email fetcher...")
-	f := email.NewFetcher(ctx, db, mail, email.MailboxInbox, logger)
+	f := email.NewFetcher(ctx, db, mail, abuseMailbox, logger)
 	err = f.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email fetcher", err)
@@ -81,7 +82,7 @@ func main() {
 
 	// create a new mail parser
 	logger.Info("Initializing email parser...")
-	p := email.NewParser(ctx, db, sponsor, logger)
+	p := email.NewParser(ctx, db, abuseSponsor, logger)
 	err = p.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email parser", err)
@@ -99,7 +100,7 @@ func main() {
 
 	// create a new finalizer
 	logger.Info("Initializing finalizer...")
-	ff := email.NewFinalizer(ctx, db, mail, email.MailboxInbox, email.MailboxAbuseScanner, logger)
+	ff := email.NewFinalizer(ctx, db, mail, abuseMailbox, logger)
 	err = ff.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email finalizer", err)

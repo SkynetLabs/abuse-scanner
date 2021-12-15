@@ -16,6 +16,15 @@ import (
 )
 
 const (
+	// AbuseStatusBlocked denotes the blocked status.
+	AbuseStatusBlocked = "BLOCKED"
+
+	// AbuseStatusNotBlocked denotes the not blocked status.
+	AbuseStatusNotBlocked = "NOT BLOCKED"
+
+	// AbuseDefaultTag is the tag used when there are no tags found in the email
+	AbuseDefaultTag = "abusive"
+
 	// collEmails is the name of the collection that contains all email objects
 	collEmails = "emails"
 
@@ -31,14 +40,14 @@ const (
 
 	// lockTTL is the time-to-live in seconds for a lock
 	lockTTL = 300 // 5 minutes
+)
 
+var (
 	// mongoDefaultTimeout is the default timeout for mongo operations that
 	// require a context but where the input arguments don't contain a
 	// context.
 	mongoDefaultTimeout = time.Minute
-)
 
-var (
 	// mongoErrNoDocuments is returned when a database operation completes
 	// successfully but it doesn't find or affect any documents.
 	mongoErrNoDocuments = errors.New("no documents in result")
@@ -54,12 +63,13 @@ type (
 
 	// AbuseEmail represent an object in the emails collection.
 	AbuseEmail struct {
-		ID      primitive.ObjectID `bson:"_id"`
-		UID     string             `bson:"email_uid"`
-		UIDRaw  uint32             `bson:"email_uid_raw"`
-		Body    []byte             `bson:"email_body"`
-		From    string             `bson:"email_from"`
-		Subject string             `bson:"email_subject"`
+		ID        primitive.ObjectID `bson:"_id"`
+		UID       string             `bson:"email_uid"`
+		UIDRaw    uint32             `bson:"email_uid_raw"`
+		Body      []byte             `bson:"email_body"`
+		From      string             `bson:"email_from"`
+		Subject   string             `bson:"email_subject"`
+		MessageID string             `bson:"email_message_id"`
 
 		// fields set by parser
 		ParsedAt    time.Time   `bson:"parsed_at"`
@@ -101,31 +111,42 @@ type (
 // String returns a string representation of the abuse email
 func (a AbuseEmail) String() string {
 	var sb strings.Builder
-	sb.WriteString("Email Info:\n")
-	sb.WriteString(fmt.Sprintf("Original From: %v\n", a.From))
-	sb.WriteString(fmt.Sprintf("Original Subject: %v\n", a.From))
-
 	pr := a.ParseResult
-	sb.WriteString("\nParse Result:\n")
-	sb.WriteString(fmt.Sprintf("Reporter Name: %v\n", pr.Reporter.Name))
-	sb.WriteString(fmt.Sprintf("Reporter Email: %v\n", pr.Reporter.Email))
+	sb.WriteString("\nAbuse Scanner Report:\n")
+
+	sb.WriteString("\nReporter:\n")
+	sb.WriteString(fmt.Sprintf("Name: %v\n", pr.Reporter.Name))
+	sb.WriteString(fmt.Sprintf("Email: %v\n", pr.Reporter.Email))
+
 	sb.WriteString("\nTags:\n")
 	for _, tag := range pr.Tags {
 		sb.WriteString(tag + "\n")
 	}
 
+	allBlocked := true
 	sb.WriteString("\nSkylinks:\n")
 	for i, skylink := range pr.Skylinks {
-		var blocked string
-		var blockedErr string
-		if a.BlockResult[i] == "OK" {
-			blocked = "BLOCKED | "
-		} else {
-			blocked = "NOT BLOCKED | "
-			blockedErr = a.BlockResult[i]
+		var parts []string
+		switch a.BlockResult[i] {
+		case AbuseStatusBlocked:
+			parts = []string{AbuseStatusBlocked, skylink}
+		default:
+			parts = []string{AbuseStatusNotBlocked, skylink, a.BlockResult[i]}
 		}
-		sb.WriteString(fmt.Sprintf("%v %v %v\n", blocked, skylink, blockedErr))
+		sb.WriteString(fmt.Sprintf("%s\n", strings.Join(parts, " | ")))
 	}
+
+	sb.WriteString("\nSummary:\n")
+	if len(pr.Skylinks) == 0 {
+		sb.WriteString("NEEDS ATTENTION: no skylinks found.\n")
+	} else {
+		if !allBlocked {
+			sb.WriteString("NEEDS ATTENTION: not all skylinks blocked.\n")
+		} else {
+			sb.WriteString("SUCCESS: all skylinks blocked.\n")
+		}
+	}
+
 	return sb.String()
 }
 
@@ -153,7 +174,6 @@ func NewAbuseScannerDB(connectionString, portalHostName string, logger *logrus.L
 
 	// ensure the locks collection
 	if database.Collection(collLocks) == nil {
-		fmt.Println("locks coll did not exist, creating...", collLocks)
 		err = database.CreateCollection(ctx, collLocks)
 		if err != nil {
 			return nil, err
@@ -191,6 +211,10 @@ func NewAbuseScannerDB(connectionString, portalHostName string, logger *logrus.L
 			},
 			{
 				Keys:    bson.D{{"blocked", 1}},
+				Options: options.Index(),
+			},
+			{
+				Keys:    bson.D{{"finalized", 1}},
 				Options: options.Index(),
 			},
 		},

@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"fmt"
-	"net/url"
 
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -56,21 +55,4 @@ func (db *MongoDB) ensureCollection(ctx context.Context, collName string) (*mong
 		return nil, fmt.Errorf("failed to ensure collection '%v'", collName)
 	}
 	return coll, nil
-}
-
-// ConnectionString is a helper that returns a valid MongoDB connection string
-func ConnectionString(host, port, user, password string) string {
-	// make sure user and password are escaped
-	// https://docs.mongodb.com/manual/reference/connection-string/#components
-	return fmt.Sprintf(
-		"mongodb://%s:%s@%s:%s/?compressors=%s&readPreference=%s&w=%s&wtimeoutMS=%s",
-		url.QueryEscape(user),
-		url.QueryEscape(password),
-		host,
-		port,
-		"zstd,zlib,snappy",
-		"primary",
-		"majority",
-		"30000",
-	)
 }

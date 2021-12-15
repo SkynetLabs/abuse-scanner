@@ -15,7 +15,8 @@ import (
 )
 
 const (
-	// blockFrequency defines the frequency with which we block skylinks
+	// blockFrequency defines the frequency with which we scan for emails for
+	// which the parsed emails have not been blocked yet.
 	blockFrequency = 30 * time.Second
 )
 
@@ -27,7 +28,7 @@ type (
 		staticBlockerAuthHeader string
 		staticContext           context.Context
 		staticDatabase          *database.AbuseScannerDB
-		staticLogger            *logrus.Logger
+		staticLogger            *logrus.Entry
 	}
 
 	// BlockPOST is the datastructure expected by the blocker API
@@ -45,7 +46,7 @@ func NewBlocker(ctx context.Context, blockerAuthHeader, blockerApiUrl string, da
 		staticBlockerApiUrl:     blockerApiUrl,
 		staticContext:           ctx,
 		staticDatabase:          database,
-		staticLogger:            logger,
+		staticLogger:            logger.WithField("module", "Blocker"),
 	}
 }
 
@@ -77,7 +78,7 @@ func (b *Blocker) threadedBlockMessages() {
 		}
 		first = false
 
-		logger.Debugln("Blocking skylinks...")
+		logger.Debugln("Triggered")
 
 		// fetch all unblocked emails
 		toBlock, err := abuseDB.FindUnblocked()
@@ -86,7 +87,13 @@ func (b *Blocker) threadedBlockMessages() {
 			continue
 		}
 
-		logger.Debugf("Found %v unblocked messages\n", len(toBlock))
+		// log unblocked messages count
+		numUnblocked := len(toBlock)
+		if numUnblocked == 0 {
+			logger.Debugf("Found %v unblocked messages\n", numUnblocked)
+		} else {
+			logger.Infof("Found %v unblocked messages\n", numUnblocked)
+		}
 
 		// loop all emails and parse them
 		for _, email := range toBlock {
@@ -130,12 +137,6 @@ func (b *Blocker) threadedBlockMessages() {
 func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 	results := make([]string, len(report.Skylinks))
 	for i, skylink := range report.Skylinks {
-		// if there are no tags, we don't block
-		if len(report.Tags) == 0 {
-			results[i] = "NO_TAGS"
-			continue
-		}
-
 		// build the request
 		req, err := b.buildBlockRequest(skylink, report.Reporter, report.Tags)
 		if err != nil {
@@ -153,10 +154,8 @@ func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 
 		// handle the response
 		switch resp.StatusCode {
-		case http.StatusOK:
-			results[i] = "OK"
-		case http.StatusNoContent:
-			results[i] = "OK_NO_CONTENT"
+		case http.StatusOK, http.StatusNoContent:
+			results[i] = database.AbuseStatusBlocked
 		default:
 			respBody, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
@@ -203,7 +202,7 @@ func (b *Blocker) buildBlockRequest(skylink string, reporter database.AbuseRepor
 	// TODO: we don't even need the auth header here seeing as we removed
 	// authentication from that route in the blocker API, I left it here anyway
 	// as we might bring that back in the future
+	// req.Header.Set("Authorization", b.staticBlockerAuthHeader)
 	req.Header.Set("User-Agent", "Sia-Agent")
-	req.Header.Set("Authorization", b.staticBlockerAuthHeader)
 	return req, nil
 }

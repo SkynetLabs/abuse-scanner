@@ -8,13 +8,17 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap/client"
+	uuid "github.com/nu7hatch/gouuid"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
 )
 
 const (
 	// finalizeFrequency defines the frequency with which we finalize reports
-	finalizeFrequency = 30 * time.Second
+	finalizeFrequency = 20 * time.Second
+
+	// scannerEmailAddress is the from email we use when sending abuse reports
+	scannerEmailAddress = "abuse-scanner@siasky.net"
 )
 
 type (
@@ -24,21 +28,19 @@ type (
 		staticContext     context.Context
 		staticDatabase    *database.AbuseScannerDB
 		staticEmailClient *client.Client
-		staticMailboxSrc  string
-		staticMailboxDst  string
-		staticLogger      *logrus.Logger
+		staticMailbox     string
+		staticLogger      *logrus.Entry
 	}
 )
 
 // NewFinalizer creates a new finalizer.
-func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailboxSrc, mailboxDst string, logger *logrus.Logger) *Finalizer {
+func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailbox string, logger *logrus.Logger) *Finalizer {
 	return &Finalizer{
 		staticContext:     ctx,
 		staticDatabase:    database,
 		staticEmailClient: emailClient,
-		staticMailboxSrc:  mailboxSrc,
-		staticMailboxDst:  mailboxDst,
-		staticLogger:      logger,
+		staticMailbox:     mailbox,
+		staticLogger:      logger.WithField("module", "Finalizer"),
 	}
 }
 
@@ -54,7 +56,6 @@ func (f *Finalizer) threadedFinalizeMessages() {
 	// convenience variables
 	logger := f.staticLogger
 	abuseDB := f.staticDatabase
-	emailClient := f.staticEmailClient
 	first := true
 
 	// start the loop
@@ -71,7 +72,7 @@ func (f *Finalizer) threadedFinalizeMessages() {
 		}
 		first = false
 
-		logger.Debugln("Finalizing reports...")
+		logger.Debugln("Triggered")
 
 		// fetch all unfinalized emails
 		toFinalize, err := abuseDB.FindUnfinalized()
@@ -80,12 +81,18 @@ func (f *Finalizer) threadedFinalizeMessages() {
 			continue
 		}
 
-		logger.Debugf("Found %v unfinalized messages\n", len(toFinalize))
+		// log unfinalized message count
+		numUnfinalized := len(toFinalize)
+		if numUnfinalized == 0 {
+			logger.Debugf("Found %v unfinalized messages\n", numUnfinalized)
+		} else {
+			logger.Infof("Found %v unfinalized messages\n", numUnfinalized)
+		}
 
 		// loop all emails and parse them
 		for _, email := range toFinalize {
 			if len(email.BlockResult) != len(email.ParseResult.Skylinks) {
-				logger.Debugf("Found mismatching blockresult and parseresult length, %v != %v, email with id %v\n", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
+				logger.Errorf("blockresult vs parseresult length, %v != %v, email with id %v\n", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
 				continue
 			}
 			err = func() (err error) {
@@ -102,22 +109,11 @@ func (f *Finalizer) threadedFinalizeMessages() {
 					}
 				}()
 
-				// copy the original email
-				// seqSet := new(imap.SeqSet)
-				// seqSet.AddNum(email.UIDRaw)
-				// err = emailClient.UidCopy(seqSet, "Abuse Scanner")
-				// if err != nil {
-				// 	return errors.AddContext(err, "could not copy email")
-				// }
-
-				// append an email with the abuse report result
-				msg := fmt.Sprintf("Subject: SCANNED (%v): %s\n", time.Now().Unix(), email.Subject)
-				msg += "From:abuse-scanner@siasky.net\n"
-				msg += "To:devs@siasky.net\n\n"
-				msg += email.String()
-
-				reader := strings.NewReader(msg)
-				err = emailClient.Append("Abuse Scanner", nil, time.Now(), reader)
+				// finalize the email
+				err = f.finalizeEmail(email)
+				if err != nil {
+					return err
+				}
 
 				// update the email
 				email.Finalized = true
@@ -135,7 +131,27 @@ func (f *Finalizer) threadedFinalizeMessages() {
 	}
 }
 
-// finalizeReport will finalize the report
-func (f *Finalizer) finalizeReport(report database.AbuseReport) error {
-	return nil
+// finalizeEmail will finalize the given abuse email
+func (f *Finalizer) finalizeEmail(email database.AbuseEmail) error {
+	// convenience variables
+	logger := f.staticLogger
+	emailClient := f.staticEmailClient
+
+	// generate a uuid as message id
+	u, err := uuid.NewV4()
+	if err != nil {
+		logger.Errorf("failed to generate uid, err %v", err)
+		return err
+	}
+
+	// append an email with the abuse report result
+	msg := fmt.Sprintf("Subject: Re: %s\n", email.Subject)
+	msg += fmt.Sprintf("Message-ID: <%s@abusescanner.gmail.com\n", u)
+	msg += fmt.Sprintf("References: %s\n", email.MessageID)
+	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
+	msg += fmt.Sprintf("From:%s\n", scannerEmailAddress)
+	msg += "To:devs@siasky.net\n\n"
+	msg += email.String()
+	reader := strings.NewReader(msg)
+	return emailClient.Append(f.staticMailbox, nil, time.Now(), reader)
 }

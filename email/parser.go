@@ -17,7 +17,7 @@ import (
 const (
 	// parseFrequency defines the frequency with which the parser looks for
 	// emails to be parsed
-	parseFrequency = 30 * time.Second
+	parseFrequency = 25 * time.Second
 )
 
 var (
@@ -32,7 +32,7 @@ type (
 	Parser struct {
 		staticContext  context.Context
 		staticDatabase *database.AbuseScannerDB
-		staticLogger   *logrus.Logger
+		staticLogger   *logrus.Entry
 		staticSponsor  string
 	}
 )
@@ -42,7 +42,7 @@ func NewParser(ctx context.Context, database *database.AbuseScannerDB, sponsor s
 	return &Parser{
 		staticContext:  ctx,
 		staticDatabase: database,
-		staticLogger:   logger,
+		staticLogger:   logger.WithField("module", "Parser"),
 		staticSponsor:  sponsor,
 	}
 }
@@ -75,7 +75,7 @@ func (p *Parser) threadedParseMessages() {
 		}
 		first = false
 
-		logger.Debugln("Parsing messages...")
+		logger.Debugln("Triggered")
 
 		// fetch all unparsed emails
 		toParse, err := abuseDB.FindUnparsed()
@@ -84,7 +84,13 @@ func (p *Parser) threadedParseMessages() {
 			continue
 		}
 
-		logger.Debugf("Found %v unparsed messages\n", len(toParse))
+		// log unparsed messages count
+		numUnparsed := len(toParse)
+		if numUnparsed == 0 {
+			logger.Debugf("Found %v unparsed messages\n", numUnparsed)
+		} else {
+			logger.Infof("Found %v unparsed messages\n", numUnparsed)
+		}
 
 		// loop all emails and parse them
 		for _, email := range toParse {
@@ -219,5 +225,11 @@ func extractTags(emailBodyBytes []byte) []string {
 	if csam {
 		tags = append(tags, "csam")
 	}
+
+	// if we have not found any tags yet
+	if len(tags) == 0 {
+		tags = append(tags, database.AbuseDefaultTag)
+	}
+
 	return tags
 }
