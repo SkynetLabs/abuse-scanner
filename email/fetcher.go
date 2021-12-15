@@ -219,18 +219,22 @@ func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSe
 	logger := f.staticLogger
 
 	messageChan := make(chan *imap.Message)
-	section := &imap.BodySectionName{}
+	section, err := imap.ParseBodySectionName("BODY[]")
+	if err != nil {
+		return err
+	}
 	done := make(chan error, 1)
 	go func() {
 		done <- email.UidFetch(toFetch, []imap.FetchItem{imap.FetchEnvelope, section.FetchItem()}, messageChan)
 	}()
 
+	toUnsee := new(imap.SeqSet)
 	for msg := range messageChan {
 		// skip messages that have been sent by the abuse scanner itself, since
 		// we reply to the original email those replies are picked up by the
 		// scanner as well
 		if isFromAbuseScanner(msg) {
-			logger.Tracef("skip message from abuse scanner (expected)")
+			logger.Debugf("skip message from abuse scanner (expected)")
 			err := f.persistSkipMessage(mailbox, msg)
 			if err != nil {
 				logger.Errorf("Failed to persist skip message, error: %v\n", err)
@@ -242,7 +246,7 @@ func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSe
 		//
 		// TODO: side-effect from UidFetch and can probably be avoided
 		if !hasBody(msg) {
-			logger.Tracef("skip message due to not having a body (expected)")
+			logger.Debugf("skip message due to not having a body (expected)")
 			err := f.persistSkipMessage(mailbox, msg)
 			if err != nil {
 				logger.Errorf("Failed to persist skip message, error: %v\n", err)
@@ -250,34 +254,39 @@ func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSe
 			continue
 		}
 
-		err := f.persistMessage(mailbox, msg)
+		toUnsee.AddNum(msg.Uid)
+		err := f.persistMessage(mailbox, msg, section)
 		if err != nil {
 			logger.Errorf("Failed to persist %v, error: %v\n", msg.Uid, err)
 		}
 	}
+
+	// unsee messages
+	flags := []interface{}{imap.SeenFlag}
+	err = email.UidStore(toUnsee, "-FLAGS.SILENT", flags, nil)
+	if err != nil {
+		logger.Debugf("Failed to unsee messages, error: %v\n", err)
+	} else {
+		logger.Debugln("Successfully unseen messages")
+	}
+
 	return <-done
 }
 
 // persistMessage will persist the given message in the abuse scanner database
-func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message) error {
+func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message, section *imap.BodySectionName) error {
 	// convenience variables
 	abuseDB := f.staticDatabase
 
 	// build the uid
 	uid := buildMessageUID(mailbox, msg.Uid)
 
-	// parse out the body
-	sectionName, err := imap.ParseBodySectionName(imap.FetchItem("BODY[]"))
-	if err != nil {
-		return errors.AddContext(err, "could not parse msg body")
-	}
-
 	// read the entire message body
-	bodyLit := msg.GetBody(sectionName)
+	bodyLit := msg.GetBody(section)
 	if bodyLit == nil {
 		return fmt.Errorf("msg %v has no body", uid)
 	}
-	body, err := ioutil.ReadAll(msg.GetBody(sectionName))
+	body, err := ioutil.ReadAll(bodyLit)
 	if err != nil {
 		return errors.AddContext(err, "could not read msg body")
 	}
@@ -322,6 +331,15 @@ func (f *Fetcher) persistSkipMessage(mailbox *imap.MailboxStatus, msg *imap.Mess
 	// build the uid
 	uid := buildMessageUID(mailbox, msg.Uid)
 
+	// skip if it already exists
+	existing, err := abuseDB.FindOne(uid)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return nil
+	}
+
 	// create the email entity from the message
 	email := database.AbuseEmail{
 		ID:     primitive.NewObjectID(),
@@ -336,7 +354,7 @@ func (f *Fetcher) persistSkipMessage(mailbox *imap.MailboxStatus, msg *imap.Mess
 	}
 
 	// insert the message in the database
-	err := abuseDB.InsertOne(email)
+	err = abuseDB.InsertOne(email)
 	if err != nil {
 		return errors.AddContext(err, "could not insert email")
 	}

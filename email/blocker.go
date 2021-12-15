@@ -117,6 +117,11 @@ func (b *Blocker) threadedBlockMessages() {
 					return errors.AddContext(err, "could not block report")
 				}
 
+				// sanity check we have a result for every skylink
+				if len(result) != len(email.ParseResult.Skylinks) {
+					return errors.New("block result not defined for every skylink")
+				}
+
 				// update the email
 				email.Blocked = true
 				email.BlockResult = result
@@ -135,40 +140,36 @@ func (b *Blocker) threadedBlockMessages() {
 
 // blockReport will block all skylinks from the given abuse report.
 func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
-	results := make([]string, len(report.Skylinks))
-	for i, skylink := range report.Skylinks {
-		// build the request
-		req, err := b.buildBlockRequest(skylink, report.Reporter, report.Tags)
-		if err != nil {
-			results[i] = fmt.Sprintf("failed to build request, err: %v", err.Error())
-			continue
-		}
-
-		// execute the request
-		b.staticLogger.Debugf("blocking %v...", skylink)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			results[i] = fmt.Sprintf("failed to execute request, err: %v", err.Error())
-			continue
-		}
-
-		// handle the response
-		switch resp.StatusCode {
-		case http.StatusOK, http.StatusNoContent:
-			results[i] = database.AbuseStatusBlocked
-		default:
-			respBody, err := ioutil.ReadAll(resp.Body)
+	var results []string
+	for _, skylink := range report.Skylinks {
+		result := func() string {
+			// build the request
+			req, err := b.buildBlockRequest(skylink, report)
 			if err != nil {
-				results[i] = fmt.Sprintf("failed to read response body, err: %v", err.Error())
-			} else {
-				results[i] = fmt.Sprintf("failed to block skylink, status %v response: %v", resp.Status, string(respBody))
+				return fmt.Sprintf("failed to build request, err: %v", err.Error())
 			}
-		}
-		resp.Body.Close()
-	}
 
-	if len(results) != len(report.Skylinks) {
-		b.staticLogger.Errorf("the result does not contain an entry for every skylink, %v != %v", len(results), len(report.Skylinks))
+			// execute the request
+			b.staticLogger.Debugf("blocking %v", skylink)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return fmt.Sprintf("failed to execute request, err: %v", err.Error())
+			}
+
+			// handle the response
+			switch resp.StatusCode {
+			case http.StatusOK, http.StatusNoContent:
+				return database.AbuseStatusBlocked
+			default:
+				respBody, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					return fmt.Sprintf("failed to read response body, err: %v", err.Error())
+				}
+				resp.Body.Close()
+				return fmt.Sprintf("failed to block skylink, status %v response: %v", resp.Status, string(respBody))
+			}
+		}()
+		results = append(results, result)
 	}
 
 	return results, nil
@@ -176,12 +177,12 @@ func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 
 // buildBlockRequest buils a request to be sent to the blocker API using the
 // provided input.
-func (b *Blocker) buildBlockRequest(skylink string, reporter database.AbuseReporter, tags []string) (*http.Request, error) {
+func (b *Blocker) buildBlockRequest(skylink string, report database.AbuseReport) (*http.Request, error) {
 	// build the request body
 	reqBody := BlockPOST{
 		Skylink:  skylink,
-		Reporter: reporter,
-		Tags:     tags,
+		Reporter: report.Reporter,
+		Tags:     report.Tags,
 	}
 
 	// build the request

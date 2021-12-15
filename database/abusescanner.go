@@ -127,23 +127,27 @@ func (a AbuseEmail) String() string {
 	sb.WriteString("\nSkylinks:\n")
 	for i, skylink := range pr.Skylinks {
 		var parts []string
+		if a.BlockResult[i] == AbuseStatusBlocked {
+			parts = []string{AbuseStatusBlocked, skylink}
+		} else {
+			parts = []string{AbuseStatusNotBlocked, skylink, a.BlockResult[i]}
+			allBlocked = false
+		}
 		switch a.BlockResult[i] {
 		case AbuseStatusBlocked:
-			parts = []string{AbuseStatusBlocked, skylink}
 		default:
-			parts = []string{AbuseStatusNotBlocked, skylink, a.BlockResult[i]}
 		}
 		sb.WriteString(fmt.Sprintf("%s\n", strings.Join(parts, " | ")))
 	}
 
 	sb.WriteString("\nSummary:\n")
 	if len(pr.Skylinks) == 0 {
-		sb.WriteString("NEEDS ATTENTION: no skylinks found.\n")
+		sb.WriteString("FAILURE - no skylinks found.\n")
 	} else {
-		if !allBlocked {
-			sb.WriteString("NEEDS ATTENTION: not all skylinks blocked.\n")
+		if allBlocked {
+			sb.WriteString("SUCCESS\n")
 		} else {
-			sb.WriteString("SUCCESS: all skylinks blocked.\n")
+			sb.WriteString("FAILURE - not all skylinks blocked.\n")
 		}
 	}
 
@@ -356,6 +360,9 @@ func (db *AbuseScannerDB) NewLock(emailUID string) *abuseEmailLock {
 // UpdateNoLock will update the given email, this method does not lock the given
 // email as it is expected for the caller to have acquired the lock.
 func (db *AbuseScannerDB) UpdateNoLock(email AbuseEmail) (err error) {
+	fmt.Println("updating email", email.UID)
+	fmt.Println("blocked: ", email.Blocked)
+	fmt.Println("block result: ", email.BlockResult)
 	// create a context with default timeout
 	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
 	defer cancel()
