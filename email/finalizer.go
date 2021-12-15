@@ -153,7 +153,7 @@ func (f *Finalizer) finalizeEmail(email database.AbuseEmail) error {
 	msg += fmt.Sprintf("Message-ID: <%s@abusescanner.gmail.com\n", u)
 	msg += fmt.Sprintf("References: %s\n", email.MessageID)
 	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
-	msg += fmt.Sprintf("From:%s\n", scannerEmailAddress)
+	msg += fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress)
 	msg += "To:devs@siasky.net\n\n"
 	msg += email.String()
 	reader := strings.NewReader(msg)
