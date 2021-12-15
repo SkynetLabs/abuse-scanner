@@ -360,9 +360,6 @@ func (db *AbuseScannerDB) NewLock(emailUID string) *abuseEmailLock {
 // UpdateNoLock will update the given email, this method does not lock the given
 // email as it is expected for the caller to have acquired the lock.
 func (db *AbuseScannerDB) UpdateNoLock(email AbuseEmail) (err error) {
-	fmt.Println("updating email", email.UID)
-	fmt.Println("blocked: ", email.Blocked)
-	fmt.Println("block result: ", email.BlockResult)
 	// create a context with default timeout
 	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
 	defer cancel()

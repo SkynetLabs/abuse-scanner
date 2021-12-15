@@ -163,11 +163,29 @@ func (p *Parser) parseEmail(email database.AbuseEmail) (database.AbuseReport, er
 }
 
 func extractSkylinks(emailBody string) []string {
-	// range over the string line by line and extract potential skylinks
+	var passedHeader bool
 	var maybeSkylinks []string
+
+	// range over the string line by line and extract potential skylinks
 	sc := bufio.NewScanner(strings.NewReader(emailBody))
 	for sc.Scan() {
 		line := sc.Text()
+
+		// NOTE: this hack ensures we do not parse the email header which
+		// contains things like `X-Google-DKIM-Signature`. These headers contain
+		// strings that match valid skylinks and thus result into false
+		// positives.
+		//
+		// TODO: we should fetch the BODY without the header although all my
+		// attempts at doing so have failed, which is why I have added this hack
+		// for the time being
+		if strings.HasPrefix(strings.ToLower(line), "from:") {
+			passedHeader = true
+		}
+		if !passedHeader {
+			continue
+		}
+
 		for _, match := range skylinkRE.FindStringSubmatch(line) {
 			if validateSkylink32RE.Match([]byte(match)) {
 				maybeSkylinks = append(maybeSkylinks, match)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -264,7 +265,7 @@ func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSe
 	// unsee messages
 	flags := []interface{}{imap.SeenFlag}
 	err = email.UidStore(toUnsee, "-FLAGS.SILENT", flags, nil)
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "Could not parse command") {
 		logger.Debugf("Failed to unsee messages, error: %v\n", err)
 	} else {
 		logger.Debugln("Successfully unseen messages")
