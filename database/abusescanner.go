@@ -73,31 +73,33 @@ type (
 
 		// fields set by parser
 		ParsedAt    time.Time   `bson:"parsed_at"`
-		ParseResult AbuseReport `bson:"parseResult"`
+		ParseResult AbuseReport `bson:"parse_result"`
 		Parsed      bool        `bson:"parsed"`
 
 		// fields set by blocker
 		BlockedAt   time.Time `bson:"blocked_at"`
-		BlockResult []string  `bson:"blockResult"`
-		Blocked     bool
+		BlockResult []string  `bson:"block_result"`
+		Blocked     bool      `bson:"blocked"`
+
+		Skip bool `bson:"skip"`
 
 		InsertedAt time.Time `bson:"inserted_at"`
-		Finalized  bool
+		Finalized  bool      `bson:"finalized"`
 	}
 
 	// AbuseReport contains all information about an abuse report.
 	AbuseReport struct {
-		Skylinks []string
-		Reporter AbuseReporter
-		Sponsor  string
-		Tags     []string
+		Skylinks []string      `bson:"skylinks"`
+		Reporter AbuseReporter `bson:"reporter"`
+		Sponsor  string        `bson:"sponsor"`
+		Tags     []string      `bson:"tags"`
 	}
 
 	// AbuseReporter encapsulates some information about the reporter.
 	AbuseReporter struct {
-		Name         string
-		Email        string
-		OtherContact string
+		Name         string `bson:"name"`
+		Email        string `bson:"email"`
+		OtherContact string `bson:"other_contact"`
 	}
 
 	// abuseEmailLock represents a lock on an abuse email.
@@ -133,10 +135,6 @@ func (a AbuseEmail) String() string {
 			parts = []string{AbuseStatusNotBlocked, skylink, a.BlockResult[i]}
 			allBlocked = false
 		}
-		switch a.BlockResult[i] {
-		case AbuseStatusBlocked:
-		default:
-		}
 		sb.WriteString(fmt.Sprintf("%s\n", strings.Join(parts, " | ")))
 	}
 
@@ -155,7 +153,7 @@ func (a AbuseEmail) String() string {
 }
 
 // NewAbuseScannerDB returns an instance of the Mongo DB.
-func NewAbuseScannerDB(connectionString, portalHostName string, logger *logrus.Logger) (*AbuseScannerDB, error) {
+func NewAbuseScannerDB(ctx context.Context, connectionString, portalHostName string, logger *logrus.Logger) (*AbuseScannerDB, error) {
 	// create the client
 	opts := options.Client().ApplyURI(connectionString)
 	client, err := mongo.NewClient(opts)
@@ -164,7 +162,7 @@ func NewAbuseScannerDB(connectionString, portalHostName string, logger *logrus.L
 	}
 
 	// create a context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
+	ctx, cancel := context.WithTimeout(ctx, mongoDefaultTimeout)
 	defer cancel()
 
 	// connect to the client
@@ -176,7 +174,9 @@ func NewAbuseScannerDB(connectionString, portalHostName string, logger *logrus.L
 	// get a database handler
 	database := client.Database(dbName)
 
-	// ensure the locks collection
+	// ensure the locks collection, this collection is managed by the
+	// distributed locking library which also manages the creation of the proper
+	// indices, which is why it's done separately from ensuring our own schema
 	if database.Collection(collLocks) == nil {
 		err = database.CreateCollection(ctx, collLocks)
 		if err != nil {
@@ -254,65 +254,54 @@ func (db *AbuseScannerDB) FindOne(emailUid string) (*AbuseEmail, error) {
 
 // FindUnblocked returns the messages that have not been blocked.
 func (db *AbuseScannerDB) FindUnblocked() ([]AbuseEmail, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
-	defer cancel()
-
-	collEmails := db.staticDatabase.Collection(collEmails)
-	cursor, err := collEmails.Find(ctx, bson.M{
+	emails, err := db.findGeneric(bson.M{
 		"parsed":    true,
 		"blocked":   false,
 		"finalized": false,
 	})
 	if err != nil {
-		return nil, errors.AddContext(err, "could not retrieve unblocked emails")
+		return nil, errors.AddContext(err, "failed to find unblocked emails")
 	}
-
-	var emails []AbuseEmail
-	err = cursor.All(context.Background(), &emails)
-	if err != nil {
-		db.staticLogger.Error("failed to parse emails", err)
-	}
-
 	return emails, nil
 }
 
 // FindUnfinalized returns the messages that have not been finalized.
 func (db *AbuseScannerDB) FindUnfinalized() ([]AbuseEmail, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
-	defer cancel()
-
-	collEmails := db.staticDatabase.Collection(collEmails)
-	cursor, err := collEmails.Find(ctx, bson.M{
+	emails, err := db.findGeneric(bson.M{
 		"parsed":    true,
 		"blocked":   true,
 		"finalized": false,
 	})
 	if err != nil {
-		return nil, errors.AddContext(err, "could not retrieve unfinalized emails")
+		return nil, errors.AddContext(err, "failed to find unfinalized emails")
 	}
-
-	var emails []AbuseEmail
-	err = cursor.All(context.Background(), &emails)
-	if err != nil {
-		db.staticLogger.Error("failed to parse emails", err)
-	}
-
 	return emails, nil
 }
 
 // FindUnparsed returns the messages that have not been parsed.
 func (db *AbuseScannerDB) FindUnparsed() ([]AbuseEmail, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
-	defer cancel()
-
-	collEmails := db.staticDatabase.Collection(collEmails)
-	cursor, err := collEmails.Find(ctx, bson.M{
+	emails, err := db.findGeneric(bson.M{
 		"parsed":    false,
 		"blocked":   false,
 		"finalized": false,
 	})
 	if err != nil {
-		return nil, errors.AddContext(err, "could not retrieve unparsed emails")
+		return nil, errors.AddContext(err, "failed to find unparsed emails")
+	}
+	return emails, nil
+}
+
+// findGeneric is a function that retrieves emails based on the given filter.
+// It's a generic function that's re-used by the more verbose find methods which
+// are exposed on the database.
+func (db *AbuseScannerDB) findGeneric(filter interface{}) ([]AbuseEmail, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
+	defer cancel()
+
+	collEmails := db.staticDatabase.Collection(collEmails)
+	cursor, err := collEmails.Find(ctx, filter)
+	if err != nil {
+		return nil, errors.AddContext(err, "could not retrieve emails")
 	}
 
 	var emails []AbuseEmail
@@ -354,6 +343,28 @@ func (db *AbuseScannerDB) InsertOne(email AbuseEmail) (err error) {
 	}
 
 	return nil
+}
+
+// Exists returns whether an email with the given uid already exists in the db.
+func (db *AbuseScannerDB) Exists(uid string) (exists bool, err error) {
+	lock := db.NewLock(uid)
+
+	// acquire a lock on the email UID and defer an unlock
+	err = lock.Lock()
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		unLockErr := lock.Unlock()
+		err = errors.Compose(err, unLockErr)
+	}()
+
+	email, err := db.FindOne(uid)
+	if err != nil {
+		return false, err
+	}
+	exists = email != nil
+	return exists, nil
 }
 
 // NewLock returns a new abuse email lock for an email with given uid.

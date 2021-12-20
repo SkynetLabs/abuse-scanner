@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -30,6 +31,7 @@ type (
 		staticContext           context.Context
 		staticDatabase          *database.AbuseScannerDB
 		staticLogger            *logrus.Entry
+		staticWaitGroup         *sync.WaitGroup
 	}
 
 	// BlockPOST is the datastructure expected by the blocker API
@@ -41,13 +43,14 @@ type (
 )
 
 // NewBlocker creates a new blocker.
-func NewBlocker(ctx context.Context, blockerAuthHeader, blockerApiUrl string, database *database.AbuseScannerDB, logger *logrus.Logger) *Blocker {
+func NewBlocker(ctx context.Context, blockerAuthHeader, blockerApiUrl string, database *database.AbuseScannerDB, waitGroup *sync.WaitGroup, logger *logrus.Logger) *Blocker {
 	return &Blocker{
 		staticBlockerAuthHeader: blockerAuthHeader,
 		staticBlockerApiUrl:     blockerApiUrl,
 		staticContext:           ctx,
 		staticDatabase:          database,
 		staticLogger:            logger.WithField("module", "Blocker"),
+		staticWaitGroup:         waitGroup,
 	}
 }
 
@@ -61,8 +64,11 @@ func (b *Blocker) Start() error {
 // been blocked yet and feed them to the blocker API.
 func (b *Blocker) threadedBlockMessages() {
 	// convenience variables
-	logger := b.staticLogger
 	abuseDB := b.staticDatabase
+	logger := b.staticLogger
+	wg := b.staticWaitGroup
+
+	ticker := time.NewTicker(blockFrequency)
 	first := true
 
 	// start the loop
@@ -74,78 +80,80 @@ func (b *Blocker) threadedBlockMessages() {
 			case <-b.staticContext.Done():
 				logger.Debugln("Blocker context done")
 				return
-			case <-time.After(blockFrequency):
+			case <-ticker.C:
 			}
 		}
 		first = false
 
 		logger.Debugln("Triggered")
 
-		// fetch all unblocked emails
-		toBlock, err := abuseDB.FindUnblocked()
-		if err != nil {
-			logger.Errorf("Failed fetching unparsed emails, error %v", err)
-			continue
-		}
+		func() {
+			wg.Add(1)
+			defer wg.Done()
 
-		// log unblocked messages count
-		numUnblocked := len(toBlock)
-		if numUnblocked == 0 {
-			logger.Debugf("Found %v unblocked messages\n", numUnblocked)
-		} else {
-			logger.Infof("Found %v unblocked messages\n", numUnblocked)
-		}
-
-		// loop all emails and parse them
-		for _, email := range toBlock {
-			err = func() (err error) {
-				lock := abuseDB.NewLock(email.UID)
-				err = lock.Lock()
-				if err != nil {
-					return errors.AddContext(err, "could not acquire lock")
-				}
-				defer func() {
-					unlockErr := lock.Unlock()
-					if unlockErr != nil {
-						err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
-						return
-					}
-				}()
-
-				// parse the email
-				result, err := b.blockReport(email.ParseResult)
-				if err != nil {
-					return errors.AddContext(err, "could not block report")
-				}
-
-				// sanity check we have a result for every skylink
-				if len(result) != len(email.ParseResult.Skylinks) {
-					return errors.New("block result not defined for every skylink")
-				}
-
-				// update the email
-				err = abuseDB.UpdateNoLock(email,
-					bson.D{
-						{"$set", bson.D{
-							{"blocked", true},
-							{"blockResult", result},
-						}},
-					},
-				)
-				if err != nil {
-					return errors.AddContext(err, "could not update email")
-				}
-				return nil
-			}()
+			// fetch all unblocked emails
+			toBlock, err := abuseDB.FindUnblocked()
 			if err != nil {
-				logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
+				logger.Errorf("Failed fetching unparsed emails, error %v", err)
+				return
 			}
-		}
+
+			// log unblocked messages count
+			numUnblocked := len(toBlock)
+			if numUnblocked == 0 {
+				logger.Debugf("Found %v unblocked messages\n", numUnblocked)
+			} else {
+				logger.Infof("Found %v unblocked messages\n", numUnblocked)
+			}
+
+			// loop all emails and parse them
+			for _, email := range toBlock {
+				err = func() (err error) {
+					lock := abuseDB.NewLock(email.UID)
+					err = lock.Lock()
+					if err != nil {
+						return errors.AddContext(err, "could not acquire lock")
+					}
+					defer func() {
+						unlockErr := lock.Unlock()
+						if unlockErr != nil {
+							err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
+							return
+						}
+					}()
+
+					// parse the email
+					result := b.blockReport(email.ParseResult)
+
+					// sanity check we have a result for every skylink
+					if len(result) != len(email.ParseResult.Skylinks) {
+						return errors.New("block result not defined for every skylink")
+					}
+
+					// update the email
+					err = abuseDB.UpdateNoLock(email,
+						bson.D{
+							{"$set", bson.D{
+								{"blocked", true},
+								{"block_result", result},
+							}},
+						},
+					)
+					if err != nil {
+						return errors.AddContext(err, "could not update email")
+					}
+					return nil
+				}()
+				if err != nil {
+					logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
+				}
+			}
+		}()
 	}
 }
 
 // blockReport will block all skylinks from the given abuse report.
-func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
+func (b *Blocker) blockReport(report database.AbuseReport) []string {
 	var results []string
 	for _, skylink := range report.Skylinks {
 		result := func() string {
@@ -178,10 +186,10 @@ func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 		results = append(results, result)
 	}
 
-	return results, nil
+	return results
 }
 
-// buildBlockRequest buils a request to be sent to the blocker API using the
+// buildBlockRequest builds a request to be sent to the blocker API using the
 // provided input.
 func (b *Blocker) buildBlockRequest(skylink string, report database.AbuseReport) (*http.Request, error) {
 	// build the request body
@@ -198,7 +206,7 @@ func (b *Blocker) buildBlockRequest(skylink string, report database.AbuseReport)
 	}
 	reqBodyBuffer := bytes.NewBuffer(reqBodyBytes)
 
-	url := fmt.Sprintf("http://%s/block", b.staticBlockerApiUrl)
+	url := fmt.Sprintf("%s/block", b.staticBlockerApiUrl)
 	req, err := http.NewRequest(http.MethodPost, url, reqBodyBuffer)
 	if err != nil {
 		return nil, err

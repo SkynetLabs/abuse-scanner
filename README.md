@@ -7,7 +7,7 @@ scan it for reported (abusive) skylinks.
 
 The scanner used a MongoDB database in which it persists two types of entities:
 - emails: used to persist the email and some state variables
-- locks: used for decentralised locking
+- locks: used for distributed locking
 
 The database name is `abuse-scanner`
   
@@ -26,9 +26,14 @@ that define whether a certain module has handled the email in question, e.g.
 - ABUSE_LOG_LEVEL=
 - ABUSE_MAILBOX=
 - ABUSE_SPONSOR=
-- BLOCKER_API_URL=
+- BLOCKER_IP=
+- BLOCKER_PORT=
 - BLOCKER_AUTH_HEADER=
 - EMAIL_SERVER=
 - EMAIL_USERNAME=
 - EMAIL_PASSWORD=
-- MONGO_CONNECTIONSTRING=
+- SERVER_DOMAIN=
+- SKYNET_DB_HOST=
+- SKYNET_DB_PORT
+- SKYNET_DB_USER=
+- SKYNET_DB_PASS=
