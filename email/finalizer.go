@@ -175,7 +175,7 @@ func (f *Finalizer) finalizeEmail(email database.AbuseEmail) error {
 
 	// append an email with the abuse report result
 	msg := fmt.Sprintf("Subject: Re: %s\n", email.Subject)
-	msg += fmt.Sprintf("Message-ID: <%s@abusescanner.gmail.com\n", u)
+	msg += fmt.Sprintf("Message-ID: <%s@abusescanner\n", u)
 	msg += fmt.Sprintf("References: %s\n", email.MessageID)
 	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
 	msg += fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress)
