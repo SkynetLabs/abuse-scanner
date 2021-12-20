@@ -3,9 +3,11 @@ package main
 import (
 	"abuse-scanner/database"
 	"abuse-scanner/email"
+	"errors"
+	"fmt"
 	"os/signal"
+	"sync"
 	"syscall"
-	"time"
 
 	"context"
 	"log"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func main() {
@@ -21,7 +24,6 @@ func main() {
 
 	// create a context
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// fetch env variables
 	abuseLoglevel := os.Getenv("ABUSE_LOG_LEVEL")
@@ -30,9 +32,10 @@ func main() {
 	emailServer := os.Getenv("EMAIL_SERVER")
 	emailUsername := os.Getenv("EMAIL_USERNAME")
 	emailPassword := os.Getenv("EMAIL_PASSWORD")
-	mongoConnectionString := os.Getenv("MONGO_CONNECTIONSTRING")
-	blockerApiUrl := os.Getenv("BLOCKER_API_URL")
+	blockerIP := os.Getenv("BLOCKER_IP")
+	blockerHost := os.Getenv("BLOCKER_HOST")
 	blockerAuthHeader := os.Getenv("BLOCKER_AUTH_HEADER")
+	serverDomain := os.Getenv("SERVER_DOMAIN")
 
 	// initialize a logger
 	logger := logrus.New()
@@ -51,7 +54,12 @@ func main() {
 	logger.SetFormatter(formatter)
 
 	// create a database client
-	db, err := database.NewAbuseScannerDB(mongoConnectionString, "localhost", logger)
+	mongoConnectionString, _, err := loadDBCredentials()
+	if err != nil {
+		log.Fatal("Failed to load mongo database credentials", err)
+	}
+
+	db, err := database.NewAbuseScannerDB(ctx, mongoConnectionString, serverDomain, logger)
 	if err != nil {
 		log.Fatal("Failed to initialize database client", err)
 	}
@@ -71,40 +79,45 @@ func main() {
 		}
 	}()
 
-	// create a new mail fetcher
+	// create a waitgroup to ensure we wait on all modules on exit
+	var wg sync.WaitGroup
+
+	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
-	f := email.NewFetcher(ctx, db, mail, abuseMailbox, logger)
+	f := email.NewFetcher(ctx, db, mail, abuseMailbox, &wg, logger)
 	err = f.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email fetcher", err)
-		return
 	}
 
-	// create a new mail parser
+	// create a new mail parser, it parses any email that's not parsed yet for
+	// abuse skylinks and a set of abuse tag
 	logger.Info("Initializing email parser...")
-	p := email.NewParser(ctx, db, abuseSponsor, logger)
+	p := email.NewParser(ctx, db, abuseSponsor, &wg, logger)
 	err = p.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email parser", err)
-		return
 	}
 
-	// create a new blocker
+	// create a new blocker, it blocks skylinks for any emails which have been
+	// parsed but not blocked yet, it uses the blocker API for this.
 	logger.Info("Initializing blocker...")
-	b := email.NewBlocker(ctx, blockerAuthHeader, blockerApiUrl, db, logger)
+	blockerApiUrl := fmt.Sprintf("http://%s:%s", blockerHost, blockerIP)
+	b := email.NewBlocker(ctx, blockerAuthHeader, blockerApiUrl, db, &wg, logger)
 	err = b.Start()
 	if err != nil {
 		log.Fatal("Failed to start the blocker", err)
-		return
 	}
 
-	// create a new finalizer
+	// create a new finalizer, it finalizes the abuse report for any emails
+	// which are parsed, blocked, but not yet finalized. An email is finalized
+	// when the abuse scanner has replied with a report of all the skylinks that
+	// have been found and blocked.
 	logger.Info("Initializing finalizer...")
-	ff := email.NewFinalizer(ctx, db, mail, abuseMailbox, logger)
+	ff := email.NewFinalizer(ctx, db, mail, abuseMailbox, &wg, logger)
 	err = ff.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email finalizer", err)
-		return
 	}
 
 	// catch exit signals
@@ -112,6 +125,29 @@ func main() {
 	signal.Notify(exitSignal, syscall.SIGINT, syscall.SIGTERM)
 	<-exitSignal
 
-	time.Sleep(time.Second)
+	// on exit call cancel and await the waitgroup
+	cancel()
+	wg.Wait()
 	logger.Info("Abuse Scanner Terminated.")
+}
+
+// loadDBCredentials creates a new db connection based on credentials found in
+// the environment variables.
+func loadDBCredentials() (string, options.Credential, error) {
+	var creds options.Credential
+	var ok bool
+	if creds.Username, ok = os.LookupEnv("SKYNET_DB_USER"); !ok {
+		return "", options.Credential{}, errors.New("missing env var SKYNET_DB_USER")
+	}
+	if creds.Password, ok = os.LookupEnv("SKYNET_DB_PASS"); !ok {
+		return "", options.Credential{}, errors.New("missing env var SKYNET_DB_PASS")
+	}
+	var host, port string
+	if host, ok = os.LookupEnv("SKYNET_DB_HOST"); !ok {
+		return "", options.Credential{}, errors.New("missing env var SKYNET_DB_HOST")
+	}
+	if port, ok = os.LookupEnv("SKYNET_DB_PORT"); !ok {
+		return "", options.Credential{}, errors.New("missing env var SKYNET_DB_PORT")
+	}
+	return fmt.Sprintf("mongodb://%v:%v", host, port), creds, nil
 }

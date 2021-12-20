@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -31,20 +32,22 @@ type (
 	// Parser is an object that will periodically scan for unparsed emails and
 	// parse them for skylinks.
 	Parser struct {
-		staticContext  context.Context
-		staticDatabase *database.AbuseScannerDB
-		staticLogger   *logrus.Entry
-		staticSponsor  string
+		staticContext   context.Context
+		staticDatabase  *database.AbuseScannerDB
+		staticLogger    *logrus.Entry
+		staticSponsor   string
+		staticWaitGroup *sync.WaitGroup
 	}
 )
 
 // NewParser creates a new parser.
-func NewParser(ctx context.Context, database *database.AbuseScannerDB, sponsor string, logger *logrus.Logger) *Parser {
+func NewParser(ctx context.Context, database *database.AbuseScannerDB, sponsor string, waitGroup *sync.WaitGroup, logger *logrus.Logger) *Parser {
 	return &Parser{
-		staticContext:  ctx,
-		staticDatabase: database,
-		staticLogger:   logger.WithField("module", "Parser"),
-		staticSponsor:  sponsor,
+		staticContext:   ctx,
+		staticDatabase:  database,
+		staticLogger:    logger.WithField("module", "Parser"),
+		staticSponsor:   sponsor,
+		staticWaitGroup: waitGroup,
 	}
 }
 
@@ -58,8 +61,11 @@ func (p *Parser) Start() error {
 // been parsed yet and parse them.
 func (p *Parser) threadedParseMessages() {
 	// convenience variables
-	logger := p.staticLogger
 	abuseDB := p.staticDatabase
+	logger := p.staticLogger
+	wg := p.staticWaitGroup
+
+	ticker := time.NewTicker(parseFrequency)
 	first := true
 
 	// start the loop
@@ -71,68 +77,73 @@ func (p *Parser) threadedParseMessages() {
 			case <-p.staticContext.Done():
 				logger.Info("Parser context done")
 				return
-			case <-time.After(parseFrequency):
+			case <-ticker.C:
 			}
 		}
 		first = false
 
 		logger.Debugln("Triggered")
 
-		// fetch all unparsed emails
-		toParse, err := abuseDB.FindUnparsed()
-		if err != nil {
-			logger.Errorf("Failed fetching unparsed emails, error %v", err)
-			continue
-		}
+		func() {
+			wg.Add(1)
+			defer wg.Done()
 
-		// log unparsed messages count
-		numUnparsed := len(toParse)
-		if numUnparsed == 0 {
-			logger.Debugf("Found %v unparsed messages\n", numUnparsed)
-		} else {
-			logger.Infof("Found %v unparsed messages\n", numUnparsed)
-		}
-
-		// loop all emails and parse them
-		for _, email := range toParse {
-			err = func() (err error) {
-				lock := abuseDB.NewLock(email.UID)
-				err = lock.Lock()
-				if err != nil {
-					return errors.AddContext(err, "could not acquire lock")
-				}
-				defer func() {
-					unlockErr := lock.Unlock()
-					if unlockErr != nil {
-						err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
-						return
-					}
-				}()
-
-				// parse the email
-				report, err := p.parseEmail(email)
-				if err != nil {
-					return errors.AddContext(err, "could not parse email")
-				}
-
-				// update the email
-				err = abuseDB.UpdateNoLock(email,
-					bson.D{
-						{"$set", bson.D{
-							{"parsed", true},
-							{"parseResult", report},
-						}},
-					},
-				)
-				if err != nil {
-					return errors.AddContext(err, "could not update email")
-				}
-				return nil
-			}()
+			// fetch all unparsed emails
+			toParse, err := abuseDB.FindUnparsed()
 			if err != nil {
-				logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
+				logger.Errorf("Failed fetching unparsed emails, error %v", err)
+				return
 			}
-		}
+
+			// log unparsed messages count
+			numUnparsed := len(toParse)
+			if numUnparsed == 0 {
+				logger.Debugf("Found %v unparsed messages\n", numUnparsed)
+			} else {
+				logger.Infof("Found %v unparsed messages\n", numUnparsed)
+			}
+
+			// loop all emails and parse them
+			for _, email := range toParse {
+				err = func() (err error) {
+					lock := abuseDB.NewLock(email.UID)
+					err = lock.Lock()
+					if err != nil {
+						return errors.AddContext(err, "could not acquire lock")
+					}
+					defer func() {
+						unlockErr := lock.Unlock()
+						if unlockErr != nil {
+							err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
+							return
+						}
+					}()
+
+					// parse the email
+					report, err := p.parseEmail(email)
+					if err != nil {
+						return errors.AddContext(err, "could not parse email")
+					}
+
+					// update the email
+					err = abuseDB.UpdateNoLock(email,
+						bson.D{
+							{"$set", bson.D{
+								{"parsed", true},
+								{"parse_result", report},
+							}},
+						},
+					)
+					if err != nil {
+						return errors.AddContext(err, "could not update email")
+					}
+					return nil
+				}()
+				if err != nil {
+					logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
+				}
+			}
+		}()
 	}
 }
 
@@ -141,6 +152,9 @@ func (p *Parser) threadedParseMessages() {
 // be used to block abusive skylinks.
 func (p *Parser) parseEmail(email database.AbuseEmail) (database.AbuseReport, error) {
 	body := email.Body
+	if body == nil {
+		return database.AbuseReport{}, errors.New("empty body")
+	}
 
 	// extract all skylinks from the email body
 	skylinks := extractSkylinks(string(body))
@@ -169,7 +183,7 @@ func (p *Parser) parseEmail(email database.AbuseEmail) (database.AbuseReport, er
 }
 
 func extractSkylinks(emailBody string) []string {
-	var passedHeader bool
+	var afterHeader bool
 	var maybeSkylinks []string
 
 	// range over the string line by line and extract potential skylinks
@@ -186,9 +200,9 @@ func extractSkylinks(emailBody string) []string {
 		// attempts at doing so have failed, which is why I have added this hack
 		// for the time being
 		if strings.HasPrefix(strings.ToLower(line), "from:") {
-			passedHeader = true
+			afterHeader = true
 		}
-		if !passedHeader {
+		if !afterHeader {
 			continue
 		}
 

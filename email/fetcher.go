@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -30,20 +31,19 @@ type (
 		staticEmailClient *client.Client
 		staticLogger      *logrus.Entry
 		staticMailbox     string
+		staticWaitGroup   *sync.WaitGroup
 	}
-
-	// messageIDMap is a helper struct that maps the message uid to its seq num
-	messageIDMap map[uint32]uint32
 )
 
 // NewFetcher creates a new fetcher.
-func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailbox string, logger *logrus.Logger) *Fetcher {
+func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailbox string, waitGroup *sync.WaitGroup, logger *logrus.Logger) *Fetcher {
 	return &Fetcher{
 		staticContext:     ctx,
 		staticDatabase:    database,
 		staticEmailClient: emailClient,
 		staticLogger:      logger.WithField("module", "Fetcher"),
 		staticMailbox:     mailbox,
+		staticWaitGroup:   waitGroup,
 	}
 }
 
@@ -71,7 +71,7 @@ func (f *Fetcher) Start() error {
 	return nil
 }
 
-// listMailboxes returns all mailboxes
+// listMailboxes returns all IMAP mailboxes
 func (f *Fetcher) listMailboxes() ([]string, error) {
 	// convenience variables
 	email := f.staticEmailClient
@@ -101,6 +101,9 @@ func (f *Fetcher) listMailboxes() ([]string, error) {
 func (f *Fetcher) threadedFetchMessages() {
 	// convenience variables
 	logger := f.staticLogger
+	wg := f.staticWaitGroup
+
+	ticker := time.NewTicker(fetchFrequency)
 	first := true
 
 	// start the loop
@@ -112,49 +115,55 @@ func (f *Fetcher) threadedFetchMessages() {
 			case <-f.staticContext.Done():
 				logger.Debugln("Fetcher context done")
 				return
-			case <-time.After(fetchFrequency):
+			case <-ticker.C:
 			}
 		}
 		first = false
 
 		logger.Debugln("Triggered")
 
-		// select the mailbox in every iteration (the uid validity might change)
-		mailbox, err := f.staticEmailClient.Select(f.staticMailbox, false)
-		if err != nil {
-			logger.Errorf("Failed selecting mailbox %v, error %v", f.staticMailbox, err)
-			continue
-		}
+		func() {
+			wg.Add(1)
+			defer wg.Done()
 
-		// get all message ids
-		msgs, err := f.getMessageIds()
-		if err != nil {
-			logger.Errorf("Failed listing messages, error %v", err)
-		}
-
-		// get missing messages
-		missing, err := f.getMessagesToFetch(mailbox, msgs)
-		if err != nil {
-			logger.Errorf("Failed listing messages, error %v", err)
-		}
-
-		// log missing messages count
-		numMissing := len(missing)
-		if numMissing == 0 {
-			logger.Debugf("Found %v missing messages", numMissing)
-		} else {
-			logger.Infof("Found %v missing messages", numMissing)
-		}
-
-		// fetch messages
-		for _, msgUid := range missing {
-			seqSet := new(imap.SeqSet)
-			seqSet.AddNum(msgUid)
-			err := f.fetchMessages(mailbox, seqSet)
+			// select the mailbox in every iteration (the uid validity might change)
+			mailbox, err := f.staticEmailClient.Select(f.staticMailbox, false)
 			if err != nil {
-				logger.Errorf("Failed fetching message %v, error %v", msgUid, err)
+				logger.Errorf("Failed selecting mailbox %v, error %v", f.staticMailbox, err)
+				return
 			}
-		}
+
+			// get all message ids
+			msgs, err := f.getMessageIds()
+			if err != nil {
+				logger.Errorf("Failed listing messages, error %v", err)
+				return
+			}
+
+			// get missing messages
+			missing, err := f.getMessagesToFetch(mailbox, msgs)
+			if err != nil {
+				logger.Errorf("Failed listing messages, error %v", err)
+			}
+
+			// log missing messages count
+			numMissing := len(missing)
+			if numMissing == 0 {
+				logger.Debugf("Found %v missing messages", numMissing)
+			} else {
+				logger.Infof("Found %v missing messages", numMissing)
+			}
+
+			// fetch messages
+			for _, msgUid := range missing {
+				seqSet := new(imap.SeqSet)
+				seqSet.AddNum(msgUid)
+				err := f.fetchMessages(mailbox, seqSet)
+				if err != nil {
+					logger.Errorf("Failed fetching message %v, error %v", msgUid, err)
+				}
+			}
+		}()
 	}
 }
 
@@ -205,7 +214,7 @@ func (f *Fetcher) getMessagesToFetch(mailbox *imap.MailboxStatus, msgs []uint32)
 			continue
 		}
 
-		// if not append it to the list of ids to fetch
+		// if the message is missing, append it to the list of msg uids to fetch
 		if email == nil {
 			toFetch = append(toFetch, msgUid)
 		}
@@ -271,6 +280,7 @@ func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSe
 		logger.Debugln("Successfully unseen messages")
 	}
 
+	// return the (possible) error value from the done channel
 	return <-done
 }
 
@@ -312,7 +322,7 @@ func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message,
 		Blocked:   false,
 		Finalized: false,
 
-		InsertedAt: time.Now(),
+		InsertedAt: time.Now().UTC(),
 	}
 
 	// insert the message in the database
@@ -333,11 +343,11 @@ func (f *Fetcher) persistSkipMessage(mailbox *imap.MailboxStatus, msg *imap.Mess
 	uid := buildMessageUID(mailbox, msg.Uid)
 
 	// skip if it already exists
-	existing, err := abuseDB.FindOne(uid)
+	exists, err := abuseDB.Exists(uid)
 	if err != nil {
 		return err
 	}
-	if existing != nil {
+	if exists {
 		return nil
 	}
 
@@ -351,7 +361,9 @@ func (f *Fetcher) persistSkipMessage(mailbox *imap.MailboxStatus, msg *imap.Mess
 		Blocked:   true,
 		Finalized: true,
 
-		InsertedAt: time.Now(),
+		Skip: true,
+
+		InsertedAt: time.Now().UTC(),
 	}
 
 	// insert the message in the database
