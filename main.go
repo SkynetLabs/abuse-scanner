@@ -27,8 +27,8 @@ func main() {
 
 	// fetch env variables
 	abuseLoglevel := os.Getenv("ABUSE_LOG_LEVEL")
-	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
 	abuseMailaddress := os.Getenv("ABUSE_MAILADDRESS")
+	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
 	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
 	emailServer := os.Getenv("EMAIL_SERVER")
 	emailUsername := os.Getenv("EMAIL_USERNAME")
