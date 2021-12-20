@@ -3,10 +3,9 @@ package main
 import (
 	"abuse-scanner/database"
 	"abuse-scanner/email"
-	"errors"
 	"fmt"
 	"os/signal"
-	"sync"
+	"strings"
 	"syscall"
 
 	"context"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/NebulousLabs/errors"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -28,14 +28,21 @@ func main() {
 	// fetch env variables
 	abuseLoglevel := os.Getenv("ABUSE_LOG_LEVEL")
 	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
+	abuseMailaddress := os.Getenv("ABUSE_MAILADDRESS")
 	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
 	emailServer := os.Getenv("EMAIL_SERVER")
 	emailUsername := os.Getenv("EMAIL_USERNAME")
 	emailPassword := os.Getenv("EMAIL_PASSWORD")
-	blockerIP := os.Getenv("BLOCKER_IP")
 	blockerHost := os.Getenv("BLOCKER_HOST")
+	blockerPort := os.Getenv("BLOCKER_PORT")
 	blockerAuthHeader := os.Getenv("BLOCKER_AUTH_HEADER")
 	serverDomain := os.Getenv("SERVER_DOMAIN")
+
+	// TODO: validate env variables
+
+	// sanitize the inputs
+	abuseMailbox = strings.Trim(abuseMailbox, "\"")
+	abuseSponsor = strings.Trim(abuseSponsor, "\"")
 
 	// initialize a logger
 	logger := logrus.New()
@@ -79,34 +86,31 @@ func main() {
 		}
 	}()
 
-	// create a waitgroup to ensure we wait on all modules on exit
-	var wg sync.WaitGroup
-
 	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
-	f := email.NewFetcher(ctx, db, mail, abuseMailbox, &wg, logger)
-	err = f.Start()
+	fetcher := email.NewFetcher(ctx, db, mail, abuseMailbox, logger)
+	err = fetcher.Start()
 	if err != nil {
-		log.Fatal("Failed to start the email fetcher", err)
+		log.Fatal("Failed to start the email fetcher, err: ", err)
 	}
 
 	// create a new mail parser, it parses any email that's not parsed yet for
 	// abuse skylinks and a set of abuse tag
 	logger.Info("Initializing email parser...")
-	p := email.NewParser(ctx, db, abuseSponsor, &wg, logger)
-	err = p.Start()
+	parser := email.NewParser(ctx, db, abuseSponsor, logger)
+	err = parser.Start()
 	if err != nil {
-		log.Fatal("Failed to start the email parser", err)
+		log.Fatal("Failed to start the email parser, err: ", err)
 	}
 
 	// create a new blocker, it blocks skylinks for any emails which have been
 	// parsed but not blocked yet, it uses the blocker API for this.
 	logger.Info("Initializing blocker...")
-	blockerApiUrl := fmt.Sprintf("http://%s:%s", blockerHost, blockerIP)
-	b := email.NewBlocker(ctx, blockerAuthHeader, blockerApiUrl, db, &wg, logger)
-	err = b.Start()
+	blockerApiUrl := fmt.Sprintf("http://%s:%s", blockerHost, blockerPort)
+	blocker := email.NewBlocker(ctx, blockerAuthHeader, blockerApiUrl, db, logger)
+	err = blocker.Start()
 	if err != nil {
-		log.Fatal("Failed to start the blocker", err)
+		log.Fatal("Failed to start the blocker, err: ", err)
 	}
 
 	// create a new finalizer, it finalizes the abuse report for any emails
@@ -114,10 +118,10 @@ func main() {
 	// when the abuse scanner has replied with a report of all the skylinks that
 	// have been found and blocked.
 	logger.Info("Initializing finalizer...")
-	ff := email.NewFinalizer(ctx, db, mail, abuseMailbox, &wg, logger)
-	err = ff.Start()
+	finalizer := email.NewFinalizer(ctx, db, mail, abuseMailaddress, abuseMailbox, logger)
+	err = finalizer.Start()
 	if err != nil {
-		log.Fatal("Failed to start the email finalizer", err)
+		log.Fatal("Failed to start the email finalizer, err: ", err)
 	}
 
 	// catch exit signals
@@ -125,9 +129,19 @@ func main() {
 	signal.Notify(exitSignal, syscall.SIGINT, syscall.SIGTERM)
 	<-exitSignal
 
-	// on exit call cancel and await the waitgroup
+	// on exit call cancel and stop all components
 	cancel()
-	wg.Wait()
+	err = errors.Compose(
+		db.Close(),
+		fetcher.Stop(),
+		parser.Stop(),
+		blocker.Stop(),
+		finalizer.Stop(),
+	)
+	if err != nil {
+		log.Fatal("Failed to cleanly close all components, err: ", err)
+	}
+
 	logger.Info("Abuse Scanner Terminated.")
 }
 

@@ -2,7 +2,7 @@ package database
 
 import (
 	"context"
-	"fmt"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -42,17 +42,20 @@ func (db *MongoDB) ensureSchema(ctx context.Context, schema dbSchema) error {
 
 // ensureCollection ensures the collection with given name exists
 func (db *MongoDB) ensureCollection(ctx context.Context, collName string) (*mongo.Collection, error) {
-	coll := db.staticDatabase.Collection(collName)
-	if coll == nil {
-		err := db.staticDatabase.CreateCollection(ctx, collName)
-		if err != nil {
-			return nil, err
-		}
-		coll = db.staticDatabase.Collection(collName)
+	err := db.staticDatabase.CreateCollection(ctx, collName)
+	if err != nil && !isCollectionExists(err) {
+		return nil, err
 	}
 
-	if coll == nil {
-		return nil, fmt.Errorf("failed to ensure collection '%v'", collName)
-	}
+	coll := db.staticDatabase.Collection(collName)
 	return coll, nil
+}
+
+// isCollectionExists is a helper function that returns whether the given error
+// contains the mongo collection already exists error message.
+func isCollectionExists(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), mongoErrCollectionExists.Error())
 }

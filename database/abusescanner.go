@@ -48,6 +48,10 @@ var (
 	// context.
 	mongoDefaultTimeout = time.Minute
 
+	// mongoErrCollectionExists is returned when a collection is created using a
+	// name that's already taken by a collection that exists.
+	mongoErrCollectionExists = errors.New("Collection already exists")
+
 	// mongoErrNoDocuments is returned when a database operation completes
 	// successfully but it doesn't find or affect any documents.
 	mongoErrNoDocuments = errors.New("no documents in result")
@@ -228,6 +232,13 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri string, mon
 	}
 
 	return db, nil
+}
+
+// Close will disconnect from the database
+func (db *AbuseScannerDB) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
+	defer cancel()
+	return db.staticClient.Disconnect(ctx)
 }
 
 // FindOne returns the message with given uid
