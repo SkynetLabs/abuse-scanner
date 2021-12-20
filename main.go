@@ -54,12 +54,12 @@ func main() {
 	logger.SetFormatter(formatter)
 
 	// create a database client
-	mongoConnectionString, _, err := loadDBCredentials()
+	mongoUri, mongoCreds, err := loadDBCredentials()
 	if err != nil {
 		log.Fatal("Failed to load mongo database credentials", err)
 	}
 
-	db, err := database.NewAbuseScannerDB(ctx, mongoConnectionString, serverDomain, logger)
+	db, err := database.NewAbuseScannerDB(ctx, serverDomain, mongoUri, mongoCreds, logger)
 	if err != nil {
 		log.Fatal("Failed to initialize database client", err)
 	}
