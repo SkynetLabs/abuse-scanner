@@ -31,19 +31,18 @@ type (
 		staticEmailClient *client.Client
 		staticLogger      *logrus.Entry
 		staticMailbox     string
-		staticWaitGroup   *sync.WaitGroup
+		staticWaitGroup   sync.WaitGroup
 	}
 )
 
 // NewFetcher creates a new fetcher.
-func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailbox string, waitGroup *sync.WaitGroup, logger *logrus.Logger) *Fetcher {
+func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailbox string, logger *logrus.Logger) *Fetcher {
 	return &Fetcher{
 		staticContext:     ctx,
 		staticDatabase:    database,
 		staticEmailClient: emailClient,
 		staticLogger:      logger.WithField("module", "Fetcher"),
 		staticMailbox:     mailbox,
-		staticWaitGroup:   waitGroup,
 	}
 }
 
@@ -64,11 +63,30 @@ func (f *Fetcher) Start() error {
 		}
 	}
 	if !found {
-		return errors.New("mailbox not found")
+		return fmt.Errorf("mailbox '%v' not found", f.staticMailbox)
 	}
 
-	go f.threadedFetchMessages()
+	f.staticWaitGroup.Add(1)
+	go func() {
+		f.threadedFetchMessages()
+		f.staticWaitGroup.Done()
+	}()
 	return nil
+}
+
+// Stop waits for the fetcher's waitgroup and times out after one minute.
+func (f *Fetcher) Stop() error {
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		f.staticWaitGroup.Wait()
+	}()
+	select {
+	case <-c:
+		return nil
+	case <-time.After(time.Minute):
+		return errors.New("unclean fetcher shutdown")
+	}
 }
 
 // listMailboxes returns all IMAP mailboxes
@@ -101,7 +119,6 @@ func (f *Fetcher) listMailboxes() ([]string, error) {
 func (f *Fetcher) threadedFetchMessages() {
 	// convenience variables
 	logger := f.staticLogger
-	wg := f.staticWaitGroup
 
 	ticker := time.NewTicker(fetchFrequency)
 	first := true
@@ -122,48 +139,43 @@ func (f *Fetcher) threadedFetchMessages() {
 
 		logger.Debugln("Triggered")
 
-		func() {
-			wg.Add(1)
-			defer wg.Done()
+		// select the mailbox in every iteration (the uid validity might change)
+		mailbox, err := f.staticEmailClient.Select(f.staticMailbox, false)
+		if err != nil {
+			logger.Errorf("Failed selecting mailbox %v, error %v", f.staticMailbox, err)
+			return
+		}
 
-			// select the mailbox in every iteration (the uid validity might change)
-			mailbox, err := f.staticEmailClient.Select(f.staticMailbox, false)
+		// get all message ids
+		msgs, err := f.getMessageIds()
+		if err != nil {
+			logger.Errorf("Failed listing messages, error %v", err)
+			return
+		}
+
+		// get missing messages
+		missing, err := f.getMessagesToFetch(mailbox, msgs)
+		if err != nil {
+			logger.Errorf("Failed listing messages, error %v", err)
+		}
+
+		// log missing messages count
+		numMissing := len(missing)
+		if numMissing == 0 {
+			logger.Debugf("Found %v missing messages", numMissing)
+			continue
+		}
+		logger.Infof("Found %v missing messages", numMissing)
+
+		// fetch messages
+		for _, msgUid := range missing {
+			seqSet := new(imap.SeqSet)
+			seqSet.AddNum(msgUid)
+			err := f.fetchMessages(mailbox, seqSet)
 			if err != nil {
-				logger.Errorf("Failed selecting mailbox %v, error %v", f.staticMailbox, err)
-				return
+				logger.Errorf("Failed fetching message %v, error %v", msgUid, err)
 			}
-
-			// get all message ids
-			msgs, err := f.getMessageIds()
-			if err != nil {
-				logger.Errorf("Failed listing messages, error %v", err)
-				return
-			}
-
-			// get missing messages
-			missing, err := f.getMessagesToFetch(mailbox, msgs)
-			if err != nil {
-				logger.Errorf("Failed listing messages, error %v", err)
-			}
-
-			// log missing messages count
-			numMissing := len(missing)
-			if numMissing == 0 {
-				logger.Debugf("Found %v missing messages", numMissing)
-			} else {
-				logger.Infof("Found %v missing messages", numMissing)
-			}
-
-			// fetch messages
-			for _, msgUid := range missing {
-				seqSet := new(imap.SeqSet)
-				seqSet.AddNum(msgUid)
-				err := f.fetchMessages(mailbox, seqSet)
-				if err != nil {
-					logger.Errorf("Failed fetching message %v, error %v", msgUid, err)
-				}
-			}
-		}()
+		}
 	}
 }
 
