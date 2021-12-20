@@ -24,6 +24,7 @@ that define whether a certain module has handled the email in question, e.g.
 ## Environment
 
 - ABUSE_LOG_LEVEL=
+- ABUSE_MAILADDRESS=
 - ABUSE_MAILBOX=
 - ABUSE_SPONSOR=
 - BLOCKER_HOST=
