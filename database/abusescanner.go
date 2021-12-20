@@ -153,9 +153,9 @@ func (a AbuseEmail) String() string {
 }
 
 // NewAbuseScannerDB returns an instance of the Mongo DB.
-func NewAbuseScannerDB(ctx context.Context, connectionString, portalHostName string, logger *logrus.Logger) (*AbuseScannerDB, error) {
+func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri string, mongoCreds options.Credential, logger *logrus.Logger) (*AbuseScannerDB, error) {
 	// create the client
-	opts := options.Client().ApplyURI(connectionString)
+	opts := options.Client().ApplyURI(mongoUri).SetAuth(mongoCreds)
 	client, err := mongo.NewClient(opts)
 	if err != nil {
 		return nil, err
