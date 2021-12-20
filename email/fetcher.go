@@ -143,14 +143,14 @@ func (f *Fetcher) threadedFetchMessages() {
 		mailbox, err := f.staticEmailClient.Select(f.staticMailbox, false)
 		if err != nil {
 			logger.Errorf("Failed selecting mailbox %v, error %v", f.staticMailbox, err)
-			return
+			continue
 		}
 
 		// get all message ids
 		msgs, err := f.getMessageIds()
 		if err != nil {
 			logger.Errorf("Failed listing messages, error %v", err)
-			return
+			continue
 		}
 
 		// get missing messages
