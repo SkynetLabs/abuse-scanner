@@ -12,7 +12,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/emersion/go-imap/client"
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
@@ -87,12 +86,9 @@ func main() {
 		}
 	}()
 
+	// define a function that reconnects the email client
 	reconnectFn := func() error {
-		err = mail.Logout()
-		if err != client.ErrAlreadyLoggedOut {
-			return err
-		}
-
+		_ = mail.Logout() // attempt logout and don't care about the error
 		mail, err = email.NewClient(emailServer, emailUsername, emailPassword)
 		if err != nil {
 			return err
@@ -102,7 +98,7 @@ func main() {
 
 	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
-	fetcher := email.NewFetcher(ctx, db, mail, abuseMailbox, logger)
+	fetcher := email.NewFetcher(ctx, db, mail, abuseMailbox, reconnectFn, logger)
 	err = fetcher.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email fetcher, err: ", err)
