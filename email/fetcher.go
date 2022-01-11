@@ -147,16 +147,20 @@ func (f *Fetcher) threadedFetchMessages() {
 
 		// select the mailbox in every iteration (the uid validity might change)
 		mailbox, err := f.staticEmailClient.Select(f.staticMailbox, false)
+
+		// try reconnecting if the client is not loggd in
 		if err == client.ErrNotLoggedIn {
-			logger.Debugln("Client not logged in, try reconnecting...")
-			err = f.staticEmailClientReconnectFn()
-			if err == nil {
+			logger.Debugln("Failed selecting mailbox, reconnecting")
+			if err := f.staticEmailClientReconnectFn(); err != nil {
+				logger.Errorf("Failed reconnecting, error %v\n", err)
+			} else {
+				// on successful reconnect, reselect the mailbox
 				logger.Debugln("reconnect succeeded, selecting mailbox")
 				mailbox, err = f.staticEmailClient.Select(f.staticMailbox, false)
 			}
 		}
 		if err != nil {
-			logger.Errorf("Failed selecting mailbox %v, error %v", f.staticMailbox, err)
+			logger.Errorf("Failed selecting mailbox %v, error %v\n", f.staticMailbox, err)
 			continue
 		}
 
