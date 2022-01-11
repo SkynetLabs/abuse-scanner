@@ -26,23 +26,29 @@ type (
 	// Fetcher is an object that will periodically scan an inbox and persist the
 	// missing messages in the database.
 	Fetcher struct {
-		staticContext     context.Context
-		staticDatabase    *database.AbuseScannerDB
-		staticEmailClient *client.Client
-		staticLogger      *logrus.Entry
-		staticMailbox     string
-		staticWaitGroup   sync.WaitGroup
+		staticContext                context.Context
+		staticDatabase               *database.AbuseScannerDB
+		staticEmailClient            *client.Client
+		staticEmailClientReconnectFn ReconnectFn
+		staticLogger                 *logrus.Entry
+		staticMailbox                string
+		staticWaitGroup              sync.WaitGroup
 	}
+
+	// ReconnectFn is a helper type that describes a function that reconnects
+	// the email client in case it has dropped its connection.
+	ReconnectFn func() error
 )
 
 // NewFetcher creates a new fetcher.
-func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailbox string, logger *logrus.Logger) *Fetcher {
+func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailbox string, reconnectFn ReconnectFn, logger *logrus.Logger) *Fetcher {
 	return &Fetcher{
-		staticContext:     ctx,
-		staticDatabase:    database,
-		staticEmailClient: emailClient,
-		staticLogger:      logger.WithField("module", "Fetcher"),
-		staticMailbox:     mailbox,
+		staticContext:                ctx,
+		staticDatabase:               database,
+		staticEmailClient:            emailClient,
+		staticEmailClientReconnectFn: reconnectFn,
+		staticLogger:                 logger.WithField("module", "Fetcher"),
+		staticMailbox:                mailbox,
 	}
 }
 
@@ -141,6 +147,14 @@ func (f *Fetcher) threadedFetchMessages() {
 
 		// select the mailbox in every iteration (the uid validity might change)
 		mailbox, err := f.staticEmailClient.Select(f.staticMailbox, false)
+		if err == client.ErrNotLoggedIn {
+			logger.Debugln("Client not logged in, try reconnecting...")
+			err = f.staticEmailClientReconnectFn()
+			if err == nil {
+				logger.Debugln("reconnect succeeded, selecting mailbox")
+				mailbox, err = f.staticEmailClient.Select(f.staticMailbox, false)
+			}
+		}
 		if err != nil {
 			logger.Errorf("Failed selecting mailbox %v, error %v", f.staticMailbox, err)
 			continue

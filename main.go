@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/emersion/go-imap/client"
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
@@ -85,6 +86,19 @@ func main() {
 			logger.Infof("Failed logging out, error: %v", err)
 		}
 	}()
+
+	reconnectFn := func() error {
+		err = mail.Logout()
+		if err != client.ErrAlreadyLoggedOut {
+			return err
+		}
+
+		mail, err = email.NewClient(emailServer, emailUsername, emailPassword)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
 
 	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
