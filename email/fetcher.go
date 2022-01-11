@@ -190,6 +190,11 @@ func (f *Fetcher) threadedFetchMessages() {
 				logger.Errorf("Failed fetching message %v, error %v", msgUid, err)
 			}
 		}
+
+		// TODO: remove - tmp logout to see if reconnect works
+		if err := f.staticEmailClient.Logout(); err != nil {
+			logger.Errorf("failed to logout, err: %v", err)
+		}
 	}
 }
 
