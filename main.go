@@ -86,9 +86,19 @@ func main() {
 		}
 	}()
 
+	// define a function that reconnects the email client
+	reconnectFn := func() error {
+		_ = mail.Logout() // attempt logout and don't care about the error
+		mail, err = email.NewClient(emailServer, emailUsername, emailPassword)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
 	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
-	fetcher := email.NewFetcher(ctx, db, mail, abuseMailbox, logger)
+	fetcher := email.NewFetcher(ctx, db, mail, abuseMailbox, reconnectFn, logger)
 	err = fetcher.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email fetcher, err: ", err)
