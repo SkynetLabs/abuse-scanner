@@ -35,7 +35,6 @@ func main() {
 	emailPassword := os.Getenv("EMAIL_PASSWORD")
 	blockerHost := os.Getenv("BLOCKER_HOST")
 	blockerPort := os.Getenv("BLOCKER_PORT")
-	blockerAuthHeader := os.Getenv("BLOCKER_AUTH_HEADER")
 	serverDomain := os.Getenv("SERVER_DOMAIN")
 
 	// TODO: validate env variables
@@ -66,39 +65,22 @@ func main() {
 		log.Fatal("Failed to load mongo database credentials", err)
 	}
 
+	// create a database instance
 	db, err := database.NewAbuseScannerDB(ctx, serverDomain, mongoUri, mongoCreds, logger)
 	if err != nil {
-		log.Fatal("Failed to initialize database client", err)
+		log.Fatalf("Failed to initialize database client, err: %v", err)
 	}
 
-	// create an email client
-	logger.Info("Initializing email client...")
-	mail, err := email.NewClient(emailServer, emailUsername, emailPassword)
-	if err != nil {
-		log.Fatal("Failed to initialize email client", err)
-	}
-
-	// defer logout
-	defer func() {
-		err := mail.Logout()
-		if err != nil {
-			logger.Infof("Failed logging out, error: %v", err)
-		}
-	}()
-
-	// define a function that reconnects the email client
-	reconnectFn := func() error {
-		_ = mail.Logout() // attempt logout and don't care about the error
-		mail, err = email.NewClient(emailServer, emailUsername, emailPassword)
-		if err != nil {
-			return err
-		}
-		return nil
+	// construct email credentials
+	emailCredentials := email.Credentials{
+		Address:  emailServer,
+		Username: emailUsername,
+		Password: emailPassword,
 	}
 
 	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
-	fetcher := email.NewFetcher(ctx, db, mail, abuseMailbox, reconnectFn, logger)
+	fetcher := email.NewFetcher(ctx, db, emailCredentials, abuseMailbox, logger)
 	err = fetcher.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email fetcher, err: ", err)
@@ -117,7 +99,7 @@ func main() {
 	// parsed but not blocked yet, it uses the blocker API for this.
 	logger.Info("Initializing blocker...")
 	blockerApiUrl := fmt.Sprintf("http://%s:%s", blockerHost, blockerPort)
-	blocker := email.NewBlocker(ctx, blockerAuthHeader, blockerApiUrl, db, logger)
+	blocker := email.NewBlocker(ctx, blockerApiUrl, db, logger)
 	err = blocker.Start()
 	if err != nil {
 		log.Fatal("Failed to start the blocker, err: ", err)
@@ -128,7 +110,7 @@ func main() {
 	// when the abuse scanner has replied with a report of all the skylinks that
 	// have been found and blocked.
 	logger.Info("Initializing finalizer...")
-	finalizer := email.NewFinalizer(ctx, db, mail, abuseMailaddress, abuseMailbox, logger)
+	finalizer := email.NewFinalizer(ctx, db, emailCredentials, abuseMailaddress, abuseMailbox, serverDomain, logger)
 	err = finalizer.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email finalizer, err: ", err)

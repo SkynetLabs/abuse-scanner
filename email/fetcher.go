@@ -26,52 +26,28 @@ type (
 	// Fetcher is an object that will periodically scan an inbox and persist the
 	// missing messages in the database.
 	Fetcher struct {
-		staticContext                context.Context
-		staticDatabase               *database.AbuseScannerDB
-		staticEmailClient            *client.Client
-		staticEmailClientReconnectFn ReconnectFn
-		staticLogger                 *logrus.Entry
-		staticMailbox                string
-		staticWaitGroup              sync.WaitGroup
+		staticContext          context.Context
+		staticDatabase         *database.AbuseScannerDB
+		staticEmailCredentials Credentials
+		staticLogger           *logrus.Entry
+		staticMailbox          string
+		staticWaitGroup        sync.WaitGroup
 	}
-
-	// ReconnectFn is a helper type that describes a function that reconnects
-	// the email client in case it has dropped its connection.
-	ReconnectFn func() error
 )
 
 // NewFetcher creates a new fetcher.
-func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailbox string, reconnectFn ReconnectFn, logger *logrus.Logger) *Fetcher {
+func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, mailbox string, logger *logrus.Logger) *Fetcher {
 	return &Fetcher{
-		staticContext:                ctx,
-		staticDatabase:               database,
-		staticEmailClient:            emailClient,
-		staticEmailClientReconnectFn: reconnectFn,
-		staticLogger:                 logger.WithField("module", "Fetcher"),
-		staticMailbox:                mailbox,
+		staticContext:          ctx,
+		staticDatabase:         database,
+		staticEmailCredentials: emailCredentials,
+		staticLogger:           logger.WithField("module", "Fetcher"),
+		staticMailbox:          mailbox,
 	}
 }
 
 // Start initializes the fetch process.
 func (f *Fetcher) Start() error {
-	// list mailboxes
-	mailboxes, err := f.listMailboxes()
-	if err != nil {
-		return err
-	}
-
-	// check whether the mailbox exists
-	found := false
-	for _, m := range mailboxes {
-		if m == f.staticMailbox {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("mailbox '%v' not found", f.staticMailbox)
-	}
-
 	f.staticWaitGroup.Add(1)
 	go func() {
 		f.threadedFetchMessages()
@@ -95,112 +71,87 @@ func (f *Fetcher) Stop() error {
 	}
 }
 
-// listMailboxes returns all IMAP mailboxes
-func (f *Fetcher) listMailboxes() ([]string, error) {
-	// convenience variables
-	email := f.staticEmailClient
-
-	// list all mailboxes
-	mailboxesChan := make(chan *imap.MailboxInfo, 10)
-	done := make(chan error, 1)
-	go func() {
-		done <- email.List("", "*", mailboxesChan)
-	}()
-
-	// add all inboxes to an array
-	mailboxes := make([]string, 0)
-	for m := range mailboxesChan {
-		mailboxes = append(mailboxes, m.Name)
-	}
-
-	// check whether an error occurred
-	err := <-done
-	if err != nil {
-		return nil, err
-	}
-	return mailboxes, nil
-}
-
 // threadedFetchMessages will periodically fetch new messages from the mailbox.
 func (f *Fetcher) threadedFetchMessages() {
 	// convenience variables
 	logger := f.staticLogger
 
+	// create a ticker
 	ticker := time.NewTicker(fetchFrequency)
-	first := true
 
 	// start the loop
 	for {
-		// sleep until next iteration, sleeping at the start of the for loop
-		// allows to 'continue' on error.
-		if !first {
-			select {
-			case <-f.staticContext.Done():
-				logger.Debugln("Fetcher context done")
-				return
-			case <-ticker.C:
-			}
-		}
-		first = false
-
 		logger.Debugln("Triggered")
-
-		// select the mailbox in every iteration (the uid validity might change)
-		mailbox, err := f.staticEmailClient.Select(f.staticMailbox, false)
-
-		// try reconnecting on error
-		if err != nil {
-			logger.Debugln("Failed selecting mailbox, reconnecting")
-			if err := f.staticEmailClientReconnectFn(); err != nil {
-				logger.Errorf("Failed reconnecting, error %v\n", err)
-			} else {
-				// on successful reconnect, reselect the mailbox
-				logger.Debugln("reconnect succeeded, selecting mailbox")
-				mailbox, err = f.staticEmailClient.Select(f.staticMailbox, false)
-			}
-		}
-		if err != nil {
-			logger.Errorf("Failed selecting mailbox %v, error %v\n", f.staticMailbox, err)
-			continue
-		}
-
-		// get all message ids
-		msgs, err := f.getMessageIds()
-		if err != nil {
-			logger.Errorf("Failed listing messages, error %v", err)
-			continue
-		}
-
-		// get missing messages
-		missing, err := f.getMessagesToFetch(mailbox, msgs)
-		if err != nil {
-			logger.Errorf("Failed listing messages, error %v", err)
-		}
-
-		// log missing messages count
-		numMissing := len(missing)
-		if numMissing == 0 {
-			logger.Debugf("Found %v missing messages", numMissing)
-			continue
-		}
-		logger.Infof("Found %v missing messages", numMissing)
-
-		// fetch messages
-		for _, msgUid := range missing {
-			seqSet := new(imap.SeqSet)
-			seqSet.AddNum(msgUid)
-			err := f.fetchMessages(mailbox, seqSet)
+		func() {
+			// create an email client
+			client, err := NewClient(f.staticEmailCredentials)
 			if err != nil {
-				logger.Errorf("Failed fetching message %v, error %v", msgUid, err)
+				logger.Errorf("Failed to initialize email client, err %v", err)
+				return
 			}
+
+			// defer a logout
+			defer func() {
+				err := client.Logout()
+				if err != nil {
+					logger.Errorf("Failed to close email client, err: %v", err)
+				}
+			}()
+
+			// select the mailbox, we have to do this in every iteration as the
+			// uid validity might change
+			mailbox, err := client.Select(f.staticMailbox, false)
+			if err != nil {
+				logger.Errorf("Failed to select mailbox %v, err: %v", f.staticMailbox, err)
+				return
+			}
+
+			// get all message ids
+			msgs, err := f.getMessageIds(client)
+			if err != nil {
+				logger.Errorf("Failed getting messages ids, err: %v", err)
+				return
+			}
+
+			// get missing messages
+			missing, err := f.getMessagesToFetch(mailbox, msgs)
+			if err != nil {
+				logger.Errorf("Failed listing messages, err: %v", err)
+				return
+			}
+
+			// log missing messages count
+			numMissing := len(missing)
+			if numMissing == 0 {
+				logger.Debugf("Found %v missing messages", numMissing)
+				return
+			}
+
+			// fetch messages
+			logger.Infof("Found %v missing messages", numMissing)
+			for _, msgUid := range missing {
+				seqSet := new(imap.SeqSet)
+				seqSet.AddNum(msgUid)
+				err := f.fetchMessages(client, mailbox, seqSet)
+				if err != nil {
+					logger.Errorf("Failed fetching message %v, err: %v", msgUid, err)
+				}
+			}
+		}()
+
+		// sleep until next iteration
+		select {
+		case <-f.staticContext.Done():
+			logger.Debugln("Fetcher context done")
+			return
+		case <-ticker.C:
 		}
 	}
 }
 
 // getMessageIds lists all messages in the current mailbox
-func (f *Fetcher) getMessageIds() ([]uint32, error) {
+func (f *Fetcher) getMessageIds(email *client.Client) ([]uint32, error) {
 	// convenience variables
-	email := f.staticEmailClient
 	logger := f.staticLogger
 
 	// construct seq set
@@ -253,9 +204,8 @@ func (f *Fetcher) getMessagesToFetch(mailbox *imap.MailboxStatus, msgs []uint32)
 }
 
 // fetchMessages fetches all messages in the given seq set and persists them in // the database
-func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSet) error {
+func (f *Fetcher) fetchMessages(client *client.Client, mailbox *imap.MailboxStatus, toFetch *imap.SeqSet) error {
 	// convenience variables
-	email := f.staticEmailClient
 	logger := f.staticLogger
 
 	messageChan := make(chan *imap.Message)
@@ -265,7 +215,7 @@ func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSe
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- email.UidFetch(toFetch, []imap.FetchItem{imap.FetchEnvelope, section.FetchItem()}, messageChan)
+		done <- client.UidFetch(toFetch, []imap.FetchItem{imap.FetchEnvelope, section.FetchItem()}, messageChan)
 	}()
 
 	toUnsee := new(imap.SeqSet)
@@ -303,7 +253,7 @@ func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSe
 
 	// unsee messages
 	flags := []interface{}{imap.SeenFlag}
-	err = email.UidStore(toUnsee, "-FLAGS.SILENT", flags, nil)
+	err = client.UidStore(toUnsee, "-FLAGS.SILENT", flags, nil)
 	if err != nil && !strings.Contains(err.Error(), "Could not parse command") {
 		logger.Debugf("Failed to unsee messages, error: %v\n", err)
 	} else {

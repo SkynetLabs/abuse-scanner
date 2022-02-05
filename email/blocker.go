@@ -26,12 +26,11 @@ type (
 	// Blocker is an object that will periodically scan the database for abuse
 	// reports that have not been blocked yet.
 	Blocker struct {
-		staticBlockerApiUrl     string
-		staticBlockerAuthHeader string
-		staticContext           context.Context
-		staticDatabase          *database.AbuseScannerDB
-		staticLogger            *logrus.Entry
-		staticWaitGroup         sync.WaitGroup
+		staticBlockerApiUrl string
+		staticContext       context.Context
+		staticDatabase      *database.AbuseScannerDB
+		staticLogger        *logrus.Entry
+		staticWaitGroup     sync.WaitGroup
 	}
 
 	// BlockPOST is the datastructure expected by the blocker API
@@ -43,13 +42,12 @@ type (
 )
 
 // NewBlocker creates a new blocker.
-func NewBlocker(ctx context.Context, blockerAuthHeader, blockerApiUrl string, database *database.AbuseScannerDB, logger *logrus.Logger) *Blocker {
+func NewBlocker(ctx context.Context, blockerApiUrl string, database *database.AbuseScannerDB, logger *logrus.Logger) *Blocker {
 	return &Blocker{
-		staticBlockerAuthHeader: blockerAuthHeader,
-		staticBlockerApiUrl:     blockerApiUrl,
-		staticContext:           ctx,
-		staticDatabase:          database,
-		staticLogger:            logger.WithField("module", "Blocker"),
+		staticBlockerApiUrl: blockerApiUrl,
+		staticContext:       ctx,
+		staticDatabase:      database,
+		staticLogger:        logger.WithField("module", "Blocker"),
 	}
 }
 
@@ -225,11 +223,6 @@ func (b *Blocker) buildBlockRequest(skylink string, report database.AbuseReport)
 	}
 
 	// add the headers
-	//
-	// TODO: we don't even need the auth header here seeing as we removed
-	// authentication from that route in the blocker API, I left it here anyway
-	// as we might bring that back in the future
-	// req.Header.Set("Authorization", b.staticBlockerAuthHeader)
 	req.Header.Set("User-Agent", "Sia-Agent")
 	return req, nil
 }
