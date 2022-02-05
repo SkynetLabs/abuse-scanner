@@ -29,7 +29,6 @@ that define whether a certain module has handled the email in question, e.g.
 - ABUSE_SPONSOR=
 - BLOCKER_HOST=
 - BLOCKER_PORT=
-- BLOCKER_AUTH_HEADER=
 - EMAIL_SERVER=
 - EMAIL_USERNAME=
 - EMAIL_PASSWORD=
