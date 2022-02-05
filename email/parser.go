@@ -3,6 +3,7 @@ package email
 import (
 	"abuse-scanner/database"
 	"bufio"
+	"bytes"
 	"context"
 	"regexp"
 	"strings"
@@ -74,101 +75,37 @@ func (p *Parser) Stop() error {
 	}
 }
 
-// threadedParseMessages will periodically fetch email messages that have not
-// been parsed yet and parse them.
-func (p *Parser) threadedParseMessages() {
-	// convenience variables
-	abuseDB := p.staticDatabase
-	logger := p.staticLogger
-
-	ticker := time.NewTicker(parseFrequency)
-	first := true
-
-	// start the loop
-	for {
-		// sleep until next iteration, sleeping at the start of the for loop
-		// allows to 'continue' on error.
-		if !first {
-			select {
-			case <-p.staticContext.Done():
-				logger.Info("Parser context done")
-				return
-			case <-ticker.C:
-			}
-		}
-		first = false
-
-		logger.Debugln("Triggered")
-
-		// fetch all unparsed emails
-		toParse, err := abuseDB.FindUnparsed()
-		if err != nil {
-			logger.Errorf("Failed fetching unparsed emails, error %v", err)
-			return
-		}
-
-		// log unparsed messages count
-		numUnparsed := len(toParse)
-		if numUnparsed == 0 {
-			logger.Debugf("Found %v unparsed messages\n", numUnparsed)
-			continue
-		}
-		logger.Infof("Found %v unparsed messages\n", numUnparsed)
-
-		// loop all emails and parse them
-		for _, email := range toParse {
-			err = func() (err error) {
-				lock := abuseDB.NewLock(email.UID)
-				err = lock.Lock()
-				if err != nil {
-					return errors.AddContext(err, "could not acquire lock")
-				}
-				defer func() {
-					unlockErr := lock.Unlock()
-					if unlockErr != nil {
-						err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
-						return
-					}
-				}()
-
-				// parse the email
-				report, err := p.parseEmail(email)
-				if err != nil {
-					return errors.AddContext(err, "could not parse email")
-				}
-
-				// update the email
-				err = abuseDB.UpdateNoLock(email,
-					bson.D{
-						{"$set", bson.D{
-							{"parsed", true},
-							{"parse_result", report},
-						}},
-					},
-				)
-				if err != nil {
-					return errors.AddContext(err, "could not update email")
-				}
-				return nil
-			}()
-			if err != nil {
-				logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
-			}
-		}
-	}
-}
-
 // parseEmail will parse the body of the given email into a list of abuse
 // reports. Every report contains a unique skylink with extra metadata and can
 // be used to block abusive skylinks.
-func (p *Parser) parseEmail(email database.AbuseEmail) (database.AbuseReport, error) {
+func (p *Parser) parseEmail(email database.AbuseEmail) error {
+	// convenience variables
+	abuseDB := p.staticDatabase
+
+	// acquire a lock on the email
+	lock := abuseDB.NewLock(email.UID)
+	err := lock.Lock()
+	if err != nil {
+		return errors.AddContext(err, "could not acquire lock")
+	}
+
+	// defer the unlock
+	defer func() {
+		unlockErr := lock.Unlock()
+		if unlockErr != nil {
+			err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
+			return
+		}
+	}()
+
+	// get the email body
 	body := email.Body
 	if body == nil {
-		return database.AbuseReport{}, errors.New("empty body")
+		return errors.New("empty body")
 	}
 
 	// extract all skylinks from the email body
-	skylinks := extractSkylinks(string(body))
+	skylinks := extractSkylinks(body)
 
 	// extract all tags from the email body
 	tags := extractTags(body)
@@ -181,21 +118,86 @@ func (p *Parser) parseEmail(email database.AbuseEmail) (database.AbuseReport, er
 		Email: string(reporterEmail),
 	}
 
-	// Create a blockpost for each skylink.
-	return database.AbuseReport{
+	// create a report
+	report := database.AbuseReport{
 		Skylinks: skylinks,
 		Reporter: reporter,
 		Sponsor:  p.staticSponsor,
 		Tags:     tags,
-	}, nil
+	}
+
+	// update the email
+	err = abuseDB.UpdateNoLock(email,
+		bson.D{
+			{"$set", bson.D{
+				{"parsed", true},
+				{"parse_result", report},
+			}},
+		},
+	)
+	if err != nil {
+		return errors.AddContext(err, "could not update email")
+	}
+	return nil
 }
 
-func extractSkylinks(emailBody string) []string {
+// threadedParseMessages will periodically fetch email messages that have not
+// been parsed yet and parse them.
+func (p *Parser) threadedParseMessages() {
+	// convenience variables
+	abuseDB := p.staticDatabase
+	logger := p.staticLogger
+
+	// create a new ticker
+	ticker := time.NewTicker(parseFrequency)
+
+	// start the loop
+	for {
+		logger.Debugln("Triggered")
+
+		func() {
+			// fetch all unparsed emails
+			toParse, err := abuseDB.FindUnparsed()
+			if err != nil {
+				logger.Errorf("Failed fetching unparsed emails, error %v", err)
+				return
+			}
+
+			// log unparsed messages count
+			numUnparsed := len(toParse)
+			if numUnparsed == 0 {
+				logger.Debugf("Found %v unparsed messages\n", numUnparsed)
+				return
+			}
+
+			logger.Infof("Found %v unparsed messages\n", numUnparsed)
+
+			// loop all emails and parse them
+			for _, email := range toParse {
+				err = p.parseEmail(email)
+				if err != nil {
+					logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
+				}
+			}
+		}()
+
+		select {
+		case <-p.staticContext.Done():
+			logger.Info("Parser context done")
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// extractSkylinks is a helper function that extracts all skylinks (as strings)
+// from the given email body.
+func extractSkylinks(emailBody []byte) []string {
 	var afterHeader bool
 	var maybeSkylinks []string
 
 	// range over the string line by line and extract potential skylinks
-	sc := bufio.NewScanner(strings.NewReader(emailBody))
+	sc := bufio.NewScanner(bytes.NewBuffer(emailBody))
 	for sc.Scan() {
 		line := sc.Text()
 
@@ -245,15 +247,17 @@ func extractSkylinks(emailBody string) []string {
 	return skylinks
 }
 
-func extractTags(emailBodyBytes []byte) []string {
-	phishing := regexp.MustCompile(`[Pp]hishing`).Find(emailBodyBytes) != nil
-	malware := regexp.MustCompile(`[Mm]alware`).Find(emailBodyBytes) != nil
-	copyright := regexp.MustCompile(`[Ii]nfringing`).Find(emailBodyBytes) != nil
-	copyright = copyright || regexp.MustCompile(`[Cc]opyright`).Find(emailBodyBytes) != nil
-	terrorism := regexp.MustCompile(`[Tt]error`).Find(emailBodyBytes) != nil
-	csam := regexp.MustCompile(`[Cc]hild`).Find(emailBodyBytes) != nil
-	csam = csam || regexp.MustCompile(`CSAM`).Find(emailBodyBytes) != nil
-	csam = csam || regexp.MustCompile(`csam`).Find(emailBodyBytes) != nil
+// extract tags is a helper function that extracts a set of tags from the given
+// email body
+func extractTags(emailBody []byte) []string {
+	phishing := regexp.MustCompile(`[Pp]hishing`).Find(emailBody) != nil
+	malware := regexp.MustCompile(`[Mm]alware`).Find(emailBody) != nil
+	copyright := regexp.MustCompile(`[Ii]nfringing`).Find(emailBody) != nil
+	copyright = copyright || regexp.MustCompile(`[Cc]opyright`).Find(emailBody) != nil
+	terrorism := regexp.MustCompile(`[Tt]error`).Find(emailBody) != nil
+	csam := regexp.MustCompile(`[Cc]hild`).Find(emailBody) != nil
+	csam = csam || regexp.MustCompile(`CSAM`).Find(emailBody) != nil
+	csam = csam || regexp.MustCompile(`csam`).Find(emailBody) != nil
 
 	var tags []string
 	if phishing {

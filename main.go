@@ -30,9 +30,6 @@ func main() {
 	abuseMailaddress := os.Getenv("ABUSE_MAILADDRESS")
 	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
 	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
-	emailServer := os.Getenv("EMAIL_SERVER")
-	emailUsername := os.Getenv("EMAIL_USERNAME")
-	emailPassword := os.Getenv("EMAIL_PASSWORD")
 	blockerHost := os.Getenv("BLOCKER_HOST")
 	blockerPort := os.Getenv("BLOCKER_PORT")
 	serverDomain := os.Getenv("SERVER_DOMAIN")
@@ -71,11 +68,10 @@ func main() {
 		log.Fatalf("Failed to initialize database client, err: %v", err)
 	}
 
-	// construct email credentials
-	emailCredentials := email.Credentials{
-		Address:  emailServer,
-		Username: emailUsername,
-		Password: emailPassword,
+	// load email credentials
+	emailCredentials, err := loadEmailCredentials()
+	if err != nil {
+		log.Fatal("Failed to load email credentials", err)
 	}
 
 	// create a new mail fetcher, it downloads the emails
@@ -137,8 +133,9 @@ func main() {
 	logger.Info("Abuse Scanner Terminated.")
 }
 
-// loadDBCredentials creates a new db connection based on credentials found in
-// the environment variables.
+// loadDBCredentials is a helper function that loads the mongo db credentials
+// from the environment. If any of the values are empty, it returns an error
+// that indicates what env variable is missing.
 func loadDBCredentials() (string, options.Credential, error) {
 	var creds options.Credential
 	var ok bool
@@ -156,4 +153,22 @@ func loadDBCredentials() (string, options.Credential, error) {
 		return "", options.Credential{}, errors.New("missing env var SKYNET_DB_PORT")
 	}
 	return fmt.Sprintf("mongodb://%v:%v", host, port), creds, nil
+}
+
+// loadEmailCredentials is a helper function that loads the email credentials
+// from the environment. If any of the values are empty, it returns an error
+// that indicates what env variable is missing.
+func loadEmailCredentials() (email.Credentials, error) {
+	var creds email.Credentials
+	var ok bool
+	if creds.Address, ok = os.LookupEnv("EMAIL_SERVER"); !ok {
+		return email.Credentials{}, errors.New("missing env var 'EMAIL_SERVER'")
+	}
+	if creds.Username, ok = os.LookupEnv("EMAIL_USERNAME"); !ok {
+		return email.Credentials{}, errors.New("missing env var 'EMAIL_USERNAME'")
+	}
+	if creds.Password, ok = os.LookupEnv("EMAIL_PASSWORD"); !ok {
+		return email.Credentials{}, errors.New("missing env var 'EMAIL_PASSWORD'")
+	}
+	return creds, nil
 }

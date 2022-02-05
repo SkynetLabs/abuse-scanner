@@ -83,83 +83,91 @@ func (b *Blocker) threadedBlockMessages() {
 	abuseDB := b.staticDatabase
 	logger := b.staticLogger
 
+	// create a new ticker
 	ticker := time.NewTicker(blockFrequency)
-	first := true
 
 	// start the loop
 	for {
-		// sleep until next iteration, sleeping at the start of the for loop
-		// allows to 'continue' on error.
-		if !first {
-			select {
-			case <-b.staticContext.Done():
-				logger.Debugln("Blocker context done")
-				return
-			case <-ticker.C:
-			}
-		}
-		first = false
-
 		logger.Debugln("Triggered")
 
-		// fetch all unblocked emails
-		toBlock, err := abuseDB.FindUnblocked()
-		if err != nil {
-			logger.Errorf("Failed fetching unparsed emails, error %v", err)
-			return
-		}
-
-		// log unblocked messages count
-		numUnblocked := len(toBlock)
-		if numUnblocked == 0 {
-			logger.Debugf("Found %v unblocked messages\n", numUnblocked)
-			continue
-		}
-		logger.Infof("Found %v unblocked messages\n", numUnblocked)
-
-		// loop all emails and parse them
-		for _, email := range toBlock {
-			err = func() (err error) {
-				lock := abuseDB.NewLock(email.UID)
-				err = lock.Lock()
-				if err != nil {
-					return errors.AddContext(err, "could not acquire lock")
-				}
-				defer func() {
-					unlockErr := lock.Unlock()
-					if unlockErr != nil {
-						err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
-						return
-					}
-				}()
-
-				// parse the email
-				result := b.blockReport(email.ParseResult)
-
-				// sanity check we have a result for every skylink
-				if len(result) != len(email.ParseResult.Skylinks) {
-					return errors.New("block result not defined for every skylink")
-				}
-
-				// update the email
-				err = abuseDB.UpdateNoLock(email,
-					bson.D{
-						{"$set", bson.D{
-							{"blocked", true},
-							{"block_result", result},
-						}},
-					},
-				)
-				if err != nil {
-					return errors.AddContext(err, "could not update email")
-				}
-				return nil
-			}()
+		func() {
+			// fetch all unblocked emails
+			toBlock, err := abuseDB.FindUnblocked()
 			if err != nil {
-				logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
+				logger.Errorf("Failed fetching unparsed emails, error %v", err)
+				return
 			}
+
+			// log unblocked messages count
+			numUnblocked := len(toBlock)
+			if numUnblocked == 0 {
+				logger.Debugf("Found %v unblocked messages\n", numUnblocked)
+				return
+			}
+
+			logger.Infof("Found %v unblocked messages\n", numUnblocked)
+
+			// loop all emails and block the skylinks they contain
+			for _, email := range toBlock {
+				err := b.blockEmail(email)
+				if err != nil {
+					logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
+				}
+			}
+		}()
+
+		select {
+		case <-b.staticContext.Done():
+			logger.Debugln("Blocker context done")
+			return
+		case <-ticker.C:
 		}
 	}
+}
+
+// blockEmail will block the skylinks that are contained in the parse result of
+// the given email.
+func (b *Blocker) blockEmail(email database.AbuseEmail) error {
+	// convenience variables
+	abuseDB := b.staticDatabase
+
+	// acquire the lock
+	lock := abuseDB.NewLock(email.UID)
+	err := lock.Lock()
+	if err != nil {
+		return errors.AddContext(err, "could not acquire lock")
+	}
+
+	// defer the release
+	defer func() {
+		unlockErr := lock.Unlock()
+		if unlockErr != nil {
+			err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
+			return
+		}
+	}()
+
+	// block the skylinks from the parse result
+	result := b.blockReport(email.ParseResult)
+
+	// sanity check we have a result for every skylink
+	if len(result) != len(email.ParseResult.Skylinks) {
+		return errors.New("block result not defined for every skylink")
+	}
+
+	// update the email
+	err = abuseDB.UpdateNoLock(email,
+		bson.D{
+			{"$set", bson.D{
+				{"blocked", true},
+				{"block_result", result},
+			}},
+		},
+	)
+	if err != nil {
+		return errors.AddContext(err, "could not update email")
+	}
+	return nil
 }
 
 // blockReport will block all skylinks from the given abuse report.
