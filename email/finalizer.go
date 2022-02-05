@@ -76,6 +76,74 @@ func (f *Finalizer) Stop() error {
 	}
 }
 
+// finalizeEmail will finalize the given email, it does so by responding to the
+// email with a report that shows an overview of what skylinks were found and
+// whether or not they got blocked successfully.
+func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEmail) error {
+	// sanity check every skylink has a blocked status
+	if len(email.BlockResult) != len(email.ParseResult.Skylinks) {
+		return fmt.Errorf("blockresult vs parseresult length, %v != %v, email with id %v\n", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
+	}
+
+	// convenience variables
+	abuseDB := f.staticDatabase
+	logger := f.staticLogger
+
+	// acquire a lock
+	lock := abuseDB.NewLock(email.UID)
+	err := lock.Lock()
+	if err != nil {
+		return errors.AddContext(err, "could not acquire lock")
+	}
+
+	// defer the unlock
+	defer func() {
+		unlockErr := lock.Unlock()
+		if unlockErr != nil {
+			err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
+			return
+		}
+	}()
+
+	// generate a uuid as message id
+	u, err := uuid.NewV4()
+	if err != nil {
+		logger.Errorf("failed to generate uid, err %v", err)
+		return err
+	}
+
+	// construct the email message
+	msg := fmt.Sprintf("Subject: Re: %s\n", email.Subject)
+	msg += fmt.Sprintf("Message-ID: <%s@abusescanner\n", u)
+	msg += fmt.Sprintf("References: %s\n", email.MessageID)
+	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
+	msg += fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress)
+	msg += fmt.Sprintf("To:%s\n", f.staticMailaddress)
+	msg += ""
+	msg += email.String()
+	msg += ""
+	msg += fmt.Sprintf("Handled by: %s\n", f.staticServerDomain)
+	reader := strings.NewReader(msg)
+
+	// append an email with the abuse report result
+	err = client.Append(f.staticMailbox, nil, time.Now(), reader)
+	if err != nil {
+		return err
+	}
+
+	// update the email
+	err = abuseDB.UpdateNoLock(email, bson.D{
+		{"$set", bson.D{
+			{"finalized", true},
+		}},
+	})
+	if err != nil {
+		return errors.AddContext(err, "could not update email")
+	}
+
+	return nil
+}
+
 // threadedFinalizeMessages will periodically fetch email messages that have not
 // been finalized yet and process them.
 func (f *Finalizer) threadedFinalizeMessages() {
@@ -122,42 +190,7 @@ func (f *Finalizer) threadedFinalizeMessages() {
 
 			// loop all emails and parse them
 			for _, email := range toFinalize {
-				if len(email.BlockResult) != len(email.ParseResult.Skylinks) {
-					logger.Errorf("blockresult vs parseresult length, %v != %v, email with id %v\n", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
-					continue
-				}
-				err = func() (err error) {
-					lock := abuseDB.NewLock(email.UID)
-					err = lock.Lock()
-					if err != nil {
-						return errors.AddContext(err, "could not acquire lock")
-					}
-					defer func() {
-						unlockErr := lock.Unlock()
-						if unlockErr != nil {
-							err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
-							return
-						}
-					}()
-
-					// finalize the email
-					err = f.finalizeEmail(client, email)
-					if err != nil {
-						return err
-					}
-
-					// update the email
-					err = abuseDB.UpdateNoLock(email, bson.D{
-						{"$set", bson.D{
-							{"finalized", true},
-						}},
-					})
-					if err != nil {
-						return errors.AddContext(err, "could not update email")
-					}
-
-					return nil
-				}()
+				err := f.finalizeEmail(client, email)
 				if err != nil {
 					logger.Errorf("Failed to finalize email %v, error %v", email.UID, err)
 				}
@@ -171,31 +204,4 @@ func (f *Finalizer) threadedFinalizeMessages() {
 		case <-ticker.C:
 		}
 	}
-}
-
-// finalizeEmail will finalize the given abuse email
-func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEmail) error {
-	// convenience variables
-	logger := f.staticLogger
-
-	// generate a uuid as message id
-	u, err := uuid.NewV4()
-	if err != nil {
-		logger.Errorf("failed to generate uid, err %v", err)
-		return err
-	}
-
-	// append an email with the abuse report result
-	msg := fmt.Sprintf("Subject: Re: %s\n", email.Subject)
-	msg += fmt.Sprintf("Message-ID: <%s@abusescanner\n", u)
-	msg += fmt.Sprintf("References: %s\n", email.MessageID)
-	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
-	msg += fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress)
-	msg += fmt.Sprintf("To:%s\n", f.staticMailaddress)
-	msg += ""
-	msg += email.String()
-	msg += ""
-	msg += fmt.Sprintf("Handled by: %s\n", f.staticServerDomain)
-	reader := strings.NewReader(msg)
-	return client.Append(f.staticMailbox, nil, time.Now(), reader)
 }
