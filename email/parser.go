@@ -77,23 +77,21 @@ func (p *Parser) Stop() error {
 	}
 }
 
-// parseEmailBody will parse the email body into an abuse report. This report
+// buildAbuseReport will parse the email body into an abuse report. This report
 // contains information about the reporter, the tags and the skylinks.
-func (p *Parser) parseEmailBody(body []byte) (database.AbuseReport, error) {
+func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseReport, error) {
 	// convenience variables
 	logger := p.staticLogger
 
 	// check for nil body
+	body := email.Body
 	if body == nil {
 		return database.AbuseReport{}, errors.New("empty body")
 	}
 
 	// extract the reporter.
-	reporterEmail := regexp.MustCompile(`From: .*`).Find(body)
-	reporterEmail = reporterEmail[6 : len(reporterEmail)-1]
 	reporter := database.AbuseReporter{
-		Name:  string(reporterEmail),
-		Email: string(reporterEmail),
+		Email: email.From,
 	}
 
 	// extract all tags and skylinks
@@ -172,7 +170,7 @@ func (p *Parser) parseEmail(email database.AbuseEmail) error {
 	}()
 
 	// parse the email body into a report
-	report, err := p.parseEmailBody(email.Body)
+	report, err := p.buildAbuseReport(email)
 	if err != nil {
 		return errors.AddContext(err, "could not parse email body")
 	}
@@ -182,6 +180,7 @@ func (p *Parser) parseEmail(email database.AbuseEmail) error {
 		bson.D{
 			{"$set", bson.D{
 				{"parsed", true},
+				{"parsed_at", time.Now().UTC()},
 				{"parse_result", report},
 			}},
 		},

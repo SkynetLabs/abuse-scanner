@@ -131,6 +131,7 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 	err = abuseDB.UpdateNoLock(email, bson.D{
 		{"$set", bson.D{
 			{"finalized", true},
+			{"finalized_at", time.Now().UTC()},
 		}},
 	})
 	if err != nil {

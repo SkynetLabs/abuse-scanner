@@ -8,6 +8,7 @@ import (
 var (
 	// ErrTooManyConnections is returned by the IMAP server if the connection
 	// can't be established because there are too many simultaneous connections.
+	// By default, Gmail's IMAP server uses a limit of only 15 connections.
 	ErrTooManyConnections = errors.New("Too many simultaneous connections")
 )
 

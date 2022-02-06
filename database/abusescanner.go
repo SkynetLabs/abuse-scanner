@@ -16,6 +16,9 @@ import (
 )
 
 const (
+	// AbuseDatabaseName defines the name of the mongo database
+	AbuseDatabaseName = "abuse-scanner"
+
 	// AbuseStatusBlocked denotes the blocked status.
 	AbuseStatusBlocked = "BLOCKED"
 
@@ -30,9 +33,6 @@ const (
 
 	// collLocks is the name of the collection that contains locks
 	collLocks = "locks"
-
-	// dbName defines the name of the mongo database
-	dbName = "abuse-scanner"
 
 	// lockOwnerName is passed as the 'Owner' when creating a new lock in
 	// the db for tus uploads.
@@ -67,6 +67,7 @@ type (
 
 	// AbuseEmail represent an object in the emails collection.
 	AbuseEmail struct {
+		// fields set by fetcher
 		ID        primitive.ObjectID `bson:"_id"`
 		UID       string             `bson:"email_uid"`
 		UIDRaw    uint32             `bson:"email_uid_raw"`
@@ -74,6 +75,11 @@ type (
 		From      string             `bson:"email_from"`
 		Subject   string             `bson:"email_subject"`
 		MessageID string             `bson:"email_message_id"`
+
+		InsertedBy string    `bson:"inserted_by"`
+		InsertedAt time.Time `bson:"inserted_at"`
+
+		Skip bool `bson:"skip"`
 
 		// fields set by parser
 		ParsedAt    time.Time   `bson:"parsed_at"`
@@ -85,11 +91,9 @@ type (
 		BlockResult []string  `bson:"block_result"`
 		Blocked     bool      `bson:"blocked"`
 
-		Skip bool `bson:"skip"`
-
-		InsertedBy string    `bson:"inserted_by"`
-		InsertedAt time.Time `bson:"inserted_at"`
-		Finalized  bool      `bson:"finalized"`
+		// fields set by finalizer
+		Finalized   bool      `bson:"finalized"`
+		FinalizedAt time.Time `bson:"finalized_at"`
 	}
 
 	// AbuseReport contains all information about an abuse report.
@@ -161,7 +165,7 @@ func (a AbuseEmail) String() string {
 }
 
 // NewAbuseScannerDB returns an instance of the Mongo DB.
-func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri string, mongoCreds options.Credential, logger *logrus.Logger) (*AbuseScannerDB, error) {
+func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri, mongoDbName string, mongoCreds options.Credential, logger *logrus.Logger) (*AbuseScannerDB, error) {
 	// create the client
 	opts := options.Client().ApplyURI(mongoUri).SetAuth(mongoCreds)
 	client, err := mongo.NewClient(opts)
@@ -180,7 +184,7 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri string, mon
 	}
 
 	// get a database handler
-	database := client.Database(dbName)
+	database := client.Database(mongoDbName)
 
 	// ensure the locks collection, this collection is managed by the
 	// distributed locking library which also manages the creation of the proper
@@ -198,7 +202,7 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri string, mon
 			staticClient:   client,
 			staticDatabase: database,
 			staticLogger:   logger,
-			staticName:     dbName,
+			staticName:     mongoDbName,
 		},
 		*lock.NewClient(database.Collection(collLocks)),
 		portalHostName,
@@ -304,6 +308,17 @@ func (db *AbuseScannerDB) FindUnparsed() ([]AbuseEmail, error) {
 		return nil, errors.AddContext(err, "failed to find unparsed emails")
 	}
 	return emails, nil
+}
+
+// Purge removes all documents from the emails and locks collection
+func (db *AbuseScannerDB) Purge(ctx context.Context) error {
+	collEmails := db.staticDatabase.Collection(collEmails)
+	collLocks := db.staticDatabase.Collection(collLocks)
+
+	_, purgeEmailsErr := collEmails.DeleteMany(ctx, bson.M{})
+	_, purgeLocksErr := collLocks.DeleteMany(ctx, bson.M{})
+
+	return errors.Compose(purgeEmailsErr, purgeLocksErr)
 }
 
 // findGeneric is a function that retrieves emails based on the given filter.

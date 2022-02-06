@@ -160,6 +160,7 @@ func (b *Blocker) blockEmail(email database.AbuseEmail) error {
 		bson.D{
 			{"$set", bson.D{
 				{"blocked", true},
+				{"blocked_at", time.Now().UTC()},
 				{"block_result", result},
 			}},
 		},

@@ -63,7 +63,7 @@ func main() {
 	}
 
 	// create a database instance
-	db, err := database.NewAbuseScannerDB(ctx, serverDomain, mongoUri, mongoCreds, logger)
+	db, err := database.NewAbuseScannerDB(ctx, serverDomain, mongoUri, database.AbuseDatabaseName, mongoCreds, logger)
 	if err != nil {
 		log.Fatalf("Failed to initialize database client, err: %v", err)
 	}
