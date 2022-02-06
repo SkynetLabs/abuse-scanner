@@ -33,13 +33,12 @@ type (
 		staticLogger           *logrus.Entry
 		staticMailbox          string
 		staticMailaddress      string
-		staticServerDomain     string
 		staticWaitGroup        sync.WaitGroup
 	}
 )
 
 // NewFinalizer creates a new finalizer.
-func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, mailaddress, mailbox, serverDomain string, logger *logrus.Logger) *Finalizer {
+func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, mailaddress, mailbox string, logger *logrus.Logger) *Finalizer {
 	return &Finalizer{
 		staticContext:          ctx,
 		staticDatabase:         database,
@@ -47,7 +46,6 @@ func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailC
 		staticLogger:           logger.WithField("module", "Finalizer"),
 		staticMailaddress:      mailaddress,
 		staticMailbox:          mailbox,
-		staticServerDomain:     serverDomain,
 	}
 }
 
@@ -121,8 +119,6 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 	msg += fmt.Sprintf("To:%s\n", f.staticMailaddress)
 	msg += ""
 	msg += email.String()
-	msg += ""
-	msg += fmt.Sprintf("Handled by: %s\n", f.staticServerDomain)
 	reader := strings.NewReader(msg)
 
 	// append an email with the abuse report result

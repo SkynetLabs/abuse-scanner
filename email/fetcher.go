@@ -31,18 +31,20 @@ type (
 		staticEmailCredentials Credentials
 		staticLogger           *logrus.Entry
 		staticMailbox          string
+		staticServerDomain     string
 		staticWaitGroup        sync.WaitGroup
 	}
 )
 
 // NewFetcher creates a new fetcher.
-func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, mailbox string, logger *logrus.Logger) *Fetcher {
+func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, mailbox, serverDomain string, logger *logrus.Logger) *Fetcher {
 	return &Fetcher{
 		staticContext:          ctx,
 		staticDatabase:         database,
 		staticEmailCredentials: emailCredentials,
 		staticLogger:           logger.WithField("module", "Fetcher"),
 		staticMailbox:          mailbox,
+		staticServerDomain:     serverDomain,
 	}
 }
 
@@ -316,6 +318,7 @@ func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message,
 		Blocked:   false,
 		Finalized: false,
 
+		InsertedBy: f.staticServerDomain,
 		InsertedAt: time.Now().UTC(),
 	}
 

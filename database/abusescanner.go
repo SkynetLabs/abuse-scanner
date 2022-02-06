@@ -87,6 +87,7 @@ type (
 
 		Skip bool `bson:"skip"`
 
+		InsertedBy string    `bson:"inserted_by"`
 		InsertedAt time.Time `bson:"inserted_at"`
 		Finalized  bool      `bson:"finalized"`
 	}
@@ -119,6 +120,9 @@ func (a AbuseEmail) String() string {
 	var sb strings.Builder
 	pr := a.ParseResult
 	sb.WriteString("\nAbuse Scanner Report:\n")
+
+	sb.WriteString("\nServer:\n")
+	sb.WriteString(fmt.Sprintf("%v\n", a.InsertedBy))
 
 	sb.WriteString("\nReporter:\n")
 	sb.WriteString(fmt.Sprintf("Name: %v\n", pr.Reporter.Name))
