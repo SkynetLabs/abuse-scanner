@@ -79,6 +79,9 @@ func (f *Fetcher) threadedFetchMessages() {
 	// create a ticker
 	ticker := time.NewTicker(fetchFrequency)
 
+	// log information about the mailbox we're fetching from
+	logger.Infof("Fetching messages for '%v' from mailbox '%v'", f.staticEmailCredentials.Username, f.staticMailbox)
+
 	// start the loop
 	for {
 		logger.Debugln("Triggered")
