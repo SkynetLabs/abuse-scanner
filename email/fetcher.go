@@ -85,7 +85,10 @@ func (f *Fetcher) threadedFetchMessages() {
 		func() {
 			// create an email client
 			client, err := NewClient(f.staticEmailCredentials)
-			if err != nil {
+			if err != nil && strings.Contains(err.Error(), ErrTooManyConnections.Error()) {
+				logger.Debugf("Skipped due to Too Many Connections (expected)")
+				return
+			} else if err != nil {
 				logger.Errorf("Failed to initialize email client, err %v", err)
 				return
 			}
@@ -103,6 +106,12 @@ func (f *Fetcher) threadedFetchMessages() {
 			mailbox, err := client.Select(f.staticMailbox, false)
 			if err != nil {
 				logger.Errorf("Failed to select mailbox %v, err: %v", f.staticMailbox, err)
+				return
+			}
+
+			// return early if the mailbox has no messages
+			if mailbox.Messages == 0 {
+				logger.Debugf("No messages in mailbox %v", f.staticMailbox)
 				return
 			}
 
@@ -277,6 +286,8 @@ func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message,
 	if bodyLit == nil {
 		return fmt.Errorf("msg %v has no body", uid)
 	}
+
+	// read the imap literal into a byte slice
 	body, err := ioutil.ReadAll(bodyLit)
 	if err != nil {
 		return errors.AddContext(err, "could not read msg body")

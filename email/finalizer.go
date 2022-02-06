@@ -17,7 +17,7 @@ import (
 
 const (
 	// finalizeFrequency defines the frequency with which we finalize reports
-	finalizeFrequency = 20 * time.Second
+	finalizeFrequency = 30 * time.Second
 
 	// scannerEmailAddress is the from email we use when sending abuse reports
 	scannerEmailAddress = "abuse-scanner@siasky.net"
@@ -159,7 +159,10 @@ func (f *Finalizer) threadedFinalizeMessages() {
 		func() {
 			// create an email client
 			client, err := NewClient(f.staticEmailCredentials)
-			if err != nil {
+			if err != nil && strings.Contains(err.Error(), ErrTooManyConnections.Error()) {
+				logger.Debugf("Skipped due to Too Many Connections (expected)")
+				return
+			} else if err != nil {
 				logger.Errorf("Failed to initialize email client, err %v", err)
 				return
 			}

@@ -5,11 +5,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"io"
+	"io/ioutil"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/emersion/go-message"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/SkynetLabs/skyd/skymodules"
@@ -19,7 +22,7 @@ import (
 const (
 	// parseFrequency defines the frequency with which the parser looks for
 	// emails to be parsed
-	parseFrequency = 25 * time.Second
+	parseFrequency = 30 * time.Second
 )
 
 var (
@@ -75,6 +78,77 @@ func (p *Parser) Stop() error {
 	}
 }
 
+// parseEmailBody will parse the email body into an abuse report. This report
+// contains information about the reporter, the tags and the skylinks.
+func (p *Parser) parseEmailBody(body []byte) (database.AbuseReport, error) {
+	// convenience variables
+	logger := p.staticLogger
+
+	// check for nil body
+	if body == nil {
+		return database.AbuseReport{}, errors.New("empty body")
+	}
+
+	// extract the reporter.
+	reporterEmail := regexp.MustCompile(`From: .*`).Find(body)
+	reporterEmail = reporterEmail[6 : len(reporterEmail)-1]
+	reporter := database.AbuseReporter{
+		Name:  string(reporterEmail),
+		Email: string(reporterEmail),
+	}
+
+	// extract all tags and skylinks
+	var tags []string
+	var skylinks []string
+
+	// use the message library to parse the email
+	msg, err := message.Read(bytes.NewBuffer(body))
+	if err != nil {
+		return database.AbuseReport{}, err
+	}
+
+	// if the message is multi-part, read every part and only parse the ones
+	// with Content-Type 'text/plain'
+	mpr := msg.MultipartReader()
+	if mpr != nil {
+		for {
+			p, err := mpr.NextPart()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				logger.Errorf("error occurred while trying to read next part from multi-part reader, err: %v", err)
+				break
+			}
+
+			t, _, _ := p.Header.ContentType()
+			if t == "text/plain" {
+				body, err = ioutil.ReadAll(p.Body)
+				if err != nil {
+					logger.Errorf("error occurred while trying to read multipart body, err: %v", err)
+					break
+				}
+
+				// extract all skylinks from the email body
+				skylinks = append(skylinks, extractSkylinks(body)...)
+
+				// extract all tags from the email body
+				tags = append(tags, extractTags(body)...)
+			}
+		}
+	} else {
+		skylinks = extractSkylinks(body)
+		tags = extractTags(body)
+	}
+
+	// return a report
+	return database.AbuseReport{
+		Skylinks: skylinks,
+		Reporter: reporter,
+		Sponsor:  p.staticSponsor,
+		Tags:     tags,
+	}, nil
+}
+
 // parseEmail will parse the body of the given email into a list of abuse
 // reports. Every report contains a unique skylink with extra metadata and can
 // be used to block abusive skylinks.
@@ -98,32 +172,10 @@ func (p *Parser) parseEmail(email database.AbuseEmail) error {
 		}
 	}()
 
-	// get the email body
-	body := email.Body
-	if body == nil {
-		return errors.New("empty body")
-	}
-
-	// extract all skylinks from the email body
-	skylinks := extractSkylinks(body)
-
-	// extract all tags from the email body
-	tags := extractTags(body)
-
-	// extract the reporter.
-	reporterEmail := regexp.MustCompile(`From: .*`).Find(body)
-	reporterEmail = reporterEmail[6 : len(reporterEmail)-1]
-	reporter := database.AbuseReporter{
-		Name:  string(reporterEmail),
-		Email: string(reporterEmail),
-	}
-
-	// create a report
-	report := database.AbuseReport{
-		Skylinks: skylinks,
-		Reporter: reporter,
-		Sponsor:  p.staticSponsor,
-		Tags:     tags,
+	// parse the email body into a report
+	report, err := p.parseEmailBody(email.Body)
+	if err != nil {
+		return errors.AddContext(err, "could not parse email body")
 	}
 
 	// update the email
