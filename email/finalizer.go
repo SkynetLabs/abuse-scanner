@@ -80,7 +80,7 @@ func (f *Finalizer) Stop() error {
 func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEmail) error {
 	// sanity check every skylink has a blocked status
 	if len(email.BlockResult) != len(email.ParseResult.Skylinks) {
-		return fmt.Errorf("blockresult vs parseresult length, %v != %v, email with id %v\n", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
+		return fmt.Errorf("blockresult vs parseresult length, %v != %v, email with id %v", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
 	}
 
 	// convenience variables
@@ -181,11 +181,11 @@ func (f *Finalizer) threadedFinalizeMessages() {
 			// log unfinalized message count
 			numUnfinalized := len(toFinalize)
 			if numUnfinalized == 0 {
-				logger.Debugf("Found %v unfinalized messages\n", numUnfinalized)
+				logger.Debugf("Found %v unfinalized messages", numUnfinalized)
 				return
 			}
 
-			logger.Infof("Found %v unfinalized messages\n", numUnfinalized)
+			logger.Infof("Found %v unfinalized messages", numUnfinalized)
 
 			// loop all emails and parse them
 			for _, email := range toFinalize {

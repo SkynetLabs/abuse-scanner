@@ -122,7 +122,7 @@ func (a AbuseEmail) String() string {
 	sb.WriteString("\nAbuse Scanner Report:\n")
 
 	sb.WriteString("\nServer:\n")
-	sb.WriteString(fmt.Sprintf("%v\n", a.InsertedBy))
+	sb.WriteString(fmt.Sprintf("Domain: %v\n", a.InsertedBy))
 
 	sb.WriteString("\nReporter:\n")
 	sb.WriteString(fmt.Sprintf("Name: %v\n", pr.Reporter.Name))

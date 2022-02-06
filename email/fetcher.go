@@ -179,7 +179,7 @@ func (f *Fetcher) getMessageIds(email *client.Client) ([]uint32, error) {
 	go func() {
 		err = email.Fetch(seqset, []imap.FetchItem{imap.FetchUid}, messageChan)
 		if err != nil {
-			logger.Errorf("Failed listing messages, error: %v\n", err)
+			logger.Errorf("Failed listing messages, error: %v", err)
 		}
 	}()
 
@@ -241,7 +241,7 @@ func (f *Fetcher) fetchMessages(client *client.Client, mailbox *imap.MailboxStat
 			logger.Debugf("skip message from abuse scanner (expected)")
 			err := f.persistSkipMessage(mailbox, msg)
 			if err != nil {
-				logger.Errorf("Failed to persist skip message, error: %v\n", err)
+				logger.Errorf("Failed to persist skip message, error: %v", err)
 			}
 			continue
 		}
@@ -253,7 +253,7 @@ func (f *Fetcher) fetchMessages(client *client.Client, mailbox *imap.MailboxStat
 			logger.Debugf("skip message due to not having a body (expected)")
 			err := f.persistSkipMessage(mailbox, msg)
 			if err != nil {
-				logger.Errorf("Failed to persist skip message, error: %v\n", err)
+				logger.Errorf("Failed to persist skip message, error: %v", err)
 			}
 			continue
 		}
@@ -261,7 +261,7 @@ func (f *Fetcher) fetchMessages(client *client.Client, mailbox *imap.MailboxStat
 		toUnsee.AddNum(msg.Uid)
 		err := f.persistMessage(mailbox, msg, section)
 		if err != nil {
-			logger.Errorf("Failed to persist %v, error: %v\n", msg.Uid, err)
+			logger.Errorf("Failed to persist %v, error: %v", msg.Uid, err)
 		}
 	}
 
@@ -269,7 +269,7 @@ func (f *Fetcher) fetchMessages(client *client.Client, mailbox *imap.MailboxStat
 	flags := []interface{}{imap.SeenFlag}
 	err = client.UidStore(toUnsee, "-FLAGS.SILENT", flags, nil)
 	if err != nil && !strings.Contains(err.Error(), "Could not parse command") {
-		logger.Debugf("Failed to unsee messages, error: %v\n", err)
+		logger.Debugf("Failed to unsee messages, error: %v", err)
 	} else {
 		logger.Debugln("Successfully unseen messages")
 	}

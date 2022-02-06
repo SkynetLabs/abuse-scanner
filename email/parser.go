@@ -217,11 +217,11 @@ func (p *Parser) threadedParseMessages() {
 			// log unparsed messages count
 			numUnparsed := len(toParse)
 			if numUnparsed == 0 {
-				logger.Debugf("Found %v unparsed messages\n", numUnparsed)
+				logger.Debugf("Found %v unparsed messages", numUnparsed)
 				return
 			}
 
-			logger.Infof("Found %v unparsed messages\n", numUnparsed)
+			logger.Infof("Found %v unparsed messages", numUnparsed)
 
 			// loop all emails and parse them
 			for _, email := range toParse {

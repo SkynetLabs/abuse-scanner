@@ -101,11 +101,11 @@ func (b *Blocker) threadedBlockMessages() {
 			// log unblocked messages count
 			numUnblocked := len(toBlock)
 			if numUnblocked == 0 {
-				logger.Debugf("Found %v unblocked messages\n", numUnblocked)
+				logger.Debugf("Found %v unblocked messages", numUnblocked)
 				return
 			}
 
-			logger.Infof("Found %v unblocked messages\n", numUnblocked)
+			logger.Infof("Found %v unblocked messages", numUnblocked)
 
 			// loop all emails and block the skylinks they contain
 			for _, email := range toBlock {
