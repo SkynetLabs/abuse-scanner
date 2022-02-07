@@ -149,13 +149,13 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 // parseEmail will parse the body of the given email into a list of abuse
 // reports. Every report contains a unique skylink with extra metadata and can
 // be used to block abusive skylinks.
-func (p *Parser) parseEmail(email database.AbuseEmail) error {
+func (p *Parser) parseEmail(email database.AbuseEmail) (err error) {
 	// convenience variables
 	abuseDB := p.staticDatabase
 
 	// acquire a lock on the email
 	lock := abuseDB.NewLock(email.UID)
-	err := lock.Lock()
+	err = lock.Lock()
 	if err != nil {
 		return errors.AddContext(err, "could not acquire lock")
 	}
@@ -170,7 +170,8 @@ func (p *Parser) parseEmail(email database.AbuseEmail) error {
 	}()
 
 	// parse the email body into a report
-	report, err := p.buildAbuseReport(email)
+	var report database.AbuseReport
+	report, err = p.buildAbuseReport(email)
 	if err != nil {
 		return errors.AddContext(err, "could not parse email body")
 	}

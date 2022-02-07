@@ -77,7 +77,7 @@ func (f *Finalizer) Stop() error {
 // finalizeEmail will finalize the given email, it does so by responding to the
 // email with a report that shows an overview of what skylinks were found and
 // whether or not they got blocked successfully.
-func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEmail) error {
+func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEmail) (err error) {
 	// sanity check every skylink has a blocked status
 	if len(email.BlockResult) != len(email.ParseResult.Skylinks) {
 		return fmt.Errorf("blockresult vs parseresult length, %v != %v, email with id %v", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
@@ -89,7 +89,7 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 
 	// acquire a lock
 	lock := abuseDB.NewLock(email.UID)
-	err := lock.Lock()
+	err = lock.Lock()
 	if err != nil {
 		return errors.AddContext(err, "could not acquire lock")
 	}
@@ -104,7 +104,8 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 	}()
 
 	// generate a uuid as message id
-	u, err := uuid.NewV4()
+	var u *uuid.UUID
+	u, err = uuid.NewV4()
 	if err != nil {
 		logger.Errorf("failed to generate uid, err %v", err)
 		return err

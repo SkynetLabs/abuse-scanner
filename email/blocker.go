@@ -127,13 +127,13 @@ func (b *Blocker) threadedBlockMessages() {
 
 // blockEmail will block the skylinks that are contained in the parse result of
 // the given email.
-func (b *Blocker) blockEmail(email database.AbuseEmail) error {
+func (b *Blocker) blockEmail(email database.AbuseEmail) (err error) {
 	// convenience variables
 	abuseDB := b.staticDatabase
 
 	// acquire the lock
 	lock := abuseDB.NewLock(email.UID)
-	err := lock.Lock()
+	err = lock.Lock()
 	if err != nil {
 		return errors.AddContext(err, "could not acquire lock")
 	}
