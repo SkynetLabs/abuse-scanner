@@ -16,9 +16,6 @@ import (
 )
 
 const (
-	// AbuseDatabaseName defines the name of the mongo database
-	AbuseDatabaseName = "abuse-scanner"
-
 	// AbuseStatusBlocked denotes the blocked status.
 	AbuseStatusBlocked = "BLOCKED"
 
@@ -27,6 +24,9 @@ const (
 
 	// AbuseDefaultTag is the tag used when there are no tags found in the email
 	AbuseDefaultTag = "abusive"
+
+	// DBAbuseScanner defines the name of the mongo database used by the scanner
+	DBAbuseScanner = "abuse-scanner"
 
 	// collEmails is the name of the collection that contains all email objects
 	collEmails = "emails"

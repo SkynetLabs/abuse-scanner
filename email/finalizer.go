@@ -142,61 +142,71 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 	return nil
 }
 
-// threadedFinalizeMessages will periodically fetch email messages that have not
-// been finalized yet and process them.
-func (f *Finalizer) threadedFinalizeMessages() {
+// finalizeMessages fetches all unfinalized messages from the database and
+// finalizes them. Finalizing means responding to the original abuse email with
+// an overview of what skylinks the abuse scanner discovered and what skylinks
+// have been blocked.
+func (f *Finalizer) finalizeMessages() {
 	// convenience variables
 	abuseDB := f.staticDatabase
 	logger := f.staticLogger
 
+	// create an email client
+	client, err := NewClient(f.staticEmailCredentials)
+	if err != nil && strings.Contains(err.Error(), ErrTooManyConnections.Error()) {
+		logger.Debugf("Skipped due to Too Many Connections (expected)")
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to initialize email client, err %v", err)
+		return
+	}
+
+	// defer a logout
+	defer func() {
+		err := client.Logout()
+		if err != nil {
+			logger.Errorf("Failed to close email client, err: %v", err)
+		}
+	}()
+
+	// fetch all unfinalized emails
+	toFinalize, err := abuseDB.FindUnfinalized()
+	if err != nil {
+		logger.Errorf("Failed fetching unparsed emails, error %v", err)
+		return
+	}
+
+	// log unfinalized message count
+	numUnfinalized := len(toFinalize)
+	if numUnfinalized == 0 {
+		logger.Debugf("Found %v unfinalized messages", numUnfinalized)
+		return
+	}
+
+	logger.Infof("Found %v unfinalized messages", numUnfinalized)
+
+	// loop all emails and parse them
+	for _, email := range toFinalize {
+		err := f.finalizeEmail(client, email)
+		if err != nil {
+			logger.Errorf("Failed to finalize email %v, error %v", email.UID, err)
+		}
+	}
+}
+
+// threadedFinalizeMessages will periodically fetch email messages that have not
+// been finalized yet and process them.
+func (f *Finalizer) threadedFinalizeMessages() {
+	// convenience variables
+	logger := f.staticLogger
+
+	// create a new ticker
 	ticker := time.NewTicker(finalizeFrequency)
 
 	// start the loop
 	for {
-		logger.Debugln("Triggered")
-		func() {
-			// create an email client
-			client, err := NewClient(f.staticEmailCredentials)
-			if err != nil && strings.Contains(err.Error(), ErrTooManyConnections.Error()) {
-				logger.Debugf("Skipped due to Too Many Connections (expected)")
-				return
-			} else if err != nil {
-				logger.Errorf("Failed to initialize email client, err %v", err)
-				return
-			}
-
-			// defer a logout
-			defer func() {
-				err := client.Logout()
-				if err != nil {
-					logger.Errorf("Failed to close email client, err: %v", err)
-				}
-			}()
-
-			// fetch all unfinalized emails
-			toFinalize, err := abuseDB.FindUnfinalized()
-			if err != nil {
-				logger.Errorf("Failed fetching unparsed emails, error %v", err)
-				return
-			}
-
-			// log unfinalized message count
-			numUnfinalized := len(toFinalize)
-			if numUnfinalized == 0 {
-				logger.Debugf("Found %v unfinalized messages", numUnfinalized)
-				return
-			}
-
-			logger.Infof("Found %v unfinalized messages", numUnfinalized)
-
-			// loop all emails and parse them
-			for _, email := range toFinalize {
-				err := f.finalizeEmail(client, email)
-				if err != nil {
-					logger.Errorf("Failed to finalize email %v, error %v", email.UID, err)
-				}
-			}
-		}()
+		logger.Debugln("threadedFinalizeMessages loop iteration triggered")
+		f.finalizeMessages()
 
 		select {
 		case <-f.staticContext.Done():

@@ -5,6 +5,7 @@ import (
 	"context"
 	"io/ioutil"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 
 var (
 	// exampleBody is an example body of an abuse email as it gets reported by a
-	// provider, the Skylinks in the examples are scrambled and not real
+	// provider, the Skylinks in the examples are scrambled and not real.
 	exampleBody = []byte(`
 	Hello,
 
@@ -29,6 +30,29 @@ var (
 
 	As a reminder, phishing is expressly prohibited by our Universal Terms of Service Agreement, paragraph 7. "Acceptable Use Policy (AUP)"
 	`)
+
+	// htmlBody is an example body of an (actual) abuse email that contains
+	// HTML, the Skylinks in the examples are scrambled and not real.
+	htmlBody = `<html><head></head><body><p><span style="color: #808080;">&mdash;-&mdash;-&mdash;-&mdash;</span></p>
+	<p><span style="color: #808080;">Please reply above this line</span></p>
+	<p>&nbsp;</p>
+	<p>Hostkey Abuse Team commented:</p>
+	<p>      </p><p></p><p>Dear Client,</p><p>We have received a phishing complaint regarding your server with IP-address XXXXXX. <br />
+	Please remove the fraudulent content within the next 24 hours or we will have to consider blocking this address.</p><p>Thank you for understanding in that matter.</p><p>The original message of the complaint is presented below.</p><p> </p><p>Dear network operator,</p><p>SWITCH-CERT has been made aware of a phishing attack against ZHDK under the following URL(s):</p><p>hXXps://siasky<span class="error">[.]</span>net/CAA0F6NzigGep-VM6sJGewvHC6pZ2sJYTIVRsDYA4_QUVA#hs.admin@zhdk<span class="error">[.]</span>ch</p><p>The pages are intended for criminal purposes and may cause considerable damage to third parties including,<br />
+	but not limited to, fraudulent financial transactions and identity theft. To demonstrate the fraudulent<br />
+	intent of the websites, we have attached screenshots of the offending sites to this mail whenever possible.</p><p>The URL(s) and/or IP(s) mentioned above belong to your constituency which is why we have contacted you<br />
+	to help us with the appropriate actions to solve this issue. We would greatly appreciate your assistance<br />
+	in removing this content as soon as possible.</p><p>If you are not the correct person to be dealing with this incident, or there is a better way for us to<br />
+	report this incident, please let us know. You are free to pass this information on to other trusted<br />
+	parties (e.g. law enforcement), as you see fit.</p><p>Many thanks for your prompt attention to this matter. Please do not hesitate to get in touch with us<br />
+	under the email address cert@switch.ch when the site has been cleaned, and we will remove your site<br />
+	from our blacklist.</p><p>Kind Regards,</p><p>SWITCH-CERT</p><p>–<br />
+	SWITCH-CERT<br />
+	SWITCH, Werdstrasse 2, P.O. Box, 8021 Zurich, Switzerland<br />
+	incident phone +41 44 268 15 40<br />
+	<a href="https://r.relay.hostkey.com/tr/cl/dH8SAQr2PfuM9z2U69X3RU4lOXxLfUvBy-PoYz0i9xaU-qfb2ba8nHjnhjGmQJWvlh1RGqVuG5GRLOEjdLptEXfwTtQZwuZ-Ktri0FbnaNv4Qsq1IwvuKJBMJPPKrCqws00fZWfF5a6L27KGJyhOZ6z2sz5u3gTAI6c1Ngfuxits8DbOEwdXd35Mw2zhzPWS0bGe_PpfRvgPbv31wAxUs0MZP0eCDcrq">http://www.switch.ch/security</a></p>
+	  <img width="1" height="1" src="https://r.relay.hostkey.com/tr/op/aAMIbWQvCFUFW51yPO-mQwWdaGyPuvXUgRReI7L4Jg-v7wCrnpIWymrHdlMYdd5M6LNIEo-fcd6kxcD5KftPakp-3NrW3Z-dvYZ_KX54q8f5897S0HES-iPqJF3-uPx30Gu15Nax8rj16DaAgWW8eKHmKEZAGhMltg" alt="" /></body></html>
+	`
 )
 
 // TestParser is a collection of unit tests that probe the functionality of
@@ -42,6 +66,7 @@ func TestParser(t *testing.T) {
 	t.Run("BuildAbuseReport", testBuildAbuseReport)
 	t.Run("ExtractSkylinks", testExtractSkylinks)
 	t.Run("ExtractTags", testExtractTags)
+	t.Run("ExtractTextFromHTML", testExtractTextFromHTML)
 }
 
 // testExtractSkylinks is a unit test that verifies the behaviour of the
@@ -88,6 +113,36 @@ func testExtractSkylinks(t *testing.T) {
 	}
 	if skylinks[0] != sl.String() {
 		t.Fatal("unexpected skylinks", skylinks)
+	}
+}
+
+// testExtractTextFromHTML is a unit test that verifies the behaviour of the
+// 'extractTextFromHTML' helper function
+func testExtractTextFromHTML(t *testing.T) {
+	t.Parallel()
+
+	// extract text from HTML
+	text, err := extractTextFromHTML(strings.NewReader(htmlBody))
+	if err != nil {
+		t.Fatal("unexpected error while extracting text from HTML", err)
+	}
+
+	// extract the skylinks from the text
+	skylinks := extractSkylinks([]byte(text))
+	if len(skylinks) != 1 {
+		t.Fatalf("unexpected amount of skylinks found, %v != 1", len(skylinks))
+	}
+	if skylinks[0] != "CAA0F6NzigGep-VM6sJGewvHC6pZ2sJYTIVRsDYA4_QUVA" {
+		t.Fatalf("unexpected skylink %v", skylinks[0])
+	}
+
+	// extract the tags from the text
+	tags := extractTags([]byte(text))
+	if len(tags) != 1 {
+		t.Fatalf("unexpected amount of tags found, %v != 1", len(tags))
+	}
+	if tags[0] != "phishing" {
+		t.Fatalf("unexpected tag %v", tags[0])
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/SkynetLabs/skyd/skymodules"
 	"go.mongodb.org/mongo-driver/bson"
+	"golang.org/x/net/html"
 )
 
 const (
@@ -104,8 +106,7 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 		return database.AbuseReport{}, err
 	}
 
-	// if the message is multi-part, read every part and only parse the ones
-	// with Content-Type 'text/plain'
+	// create a multi-part reader from the message
 	mpr := msg.MultipartReader()
 	if mpr != nil {
 		for {
@@ -118,7 +119,8 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 			}
 
 			t, _, _ := p.Header.ContentType()
-			if t == "text/plain" {
+			switch t {
+			case "text/plain":
 				body, err = ioutil.ReadAll(p.Body)
 				if err != nil {
 					logger.Errorf("error occurred while trying to read multipart body, err: %v", err)
@@ -130,6 +132,20 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 
 				// extract all tags from the email body
 				tags = append(tags, extractTags(body)...)
+			case "text/html":
+				// extract all text from the HTML
+				text, err := extractTextFromHTML(p.Body)
+				if err != nil {
+					logger.Errorf("error occurred while trying to read the HTML from the multipart body, err: %v", err)
+					break
+				}
+
+				// extract all skylinks from the HTML
+				skylinks = append(skylinks, extractSkylinks([]byte(text))...)
+
+				// extract all tags from the HTML
+				tags = append(tags, extractTags([]byte(text))...)
+			default:
 			}
 		}
 	} else {
@@ -192,11 +208,43 @@ func (p *Parser) parseEmail(email database.AbuseEmail) (err error) {
 	return nil
 }
 
+// parseMessages fetches all unparsed message from the database and parses them.
+// Parsing entails extracting all skylinks and tags from the email to build an
+// abuse report, which is set on the abuse email in the database.
+func (p *Parser) parseMessages() {
+	// convenience variables
+	abuseDB := p.staticDatabase
+	logger := p.staticLogger
+
+	// fetch all unparsed emails
+	toParse, err := abuseDB.FindUnparsed()
+	if err != nil {
+		logger.Errorf("Failed fetching unparsed emails, error %v", err)
+		return
+	}
+
+	// log unparsed messages count
+	numUnparsed := len(toParse)
+	if numUnparsed == 0 {
+		logger.Debugf("Found %v unparsed messages", numUnparsed)
+		return
+	}
+
+	logger.Infof("Found %v unparsed messages", numUnparsed)
+
+	// loop all emails and parse them
+	for _, email := range toParse {
+		err = p.parseEmail(email)
+		if err != nil {
+			logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
+		}
+	}
+}
+
 // threadedParseMessages will periodically fetch email messages that have not
 // been parsed yet and parse them.
 func (p *Parser) threadedParseMessages() {
 	// convenience variables
-	abuseDB := p.staticDatabase
 	logger := p.staticLogger
 
 	// create a new ticker
@@ -204,33 +252,8 @@ func (p *Parser) threadedParseMessages() {
 
 	// start the loop
 	for {
-		logger.Debugln("Triggered")
-
-		func() {
-			// fetch all unparsed emails
-			toParse, err := abuseDB.FindUnparsed()
-			if err != nil {
-				logger.Errorf("Failed fetching unparsed emails, error %v", err)
-				return
-			}
-
-			// log unparsed messages count
-			numUnparsed := len(toParse)
-			if numUnparsed == 0 {
-				logger.Debugf("Found %v unparsed messages", numUnparsed)
-				return
-			}
-
-			logger.Infof("Found %v unparsed messages", numUnparsed)
-
-			// loop all emails and parse them
-			for _, email := range toParse {
-				err = p.parseEmail(email)
-				if err != nil {
-					logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
-				}
-			}
-		}()
+		logger.Debugln("threadedParseMessages loop iteration triggered")
+		p.parseMessages()
 
 		select {
 		case <-p.staticContext.Done():
@@ -242,12 +265,12 @@ func (p *Parser) threadedParseMessages() {
 }
 
 // extractSkylinks is a helper function that extracts all skylinks (as strings)
-// from the given email body.
-func extractSkylinks(emailBody []byte) []string {
+// from the given byte slice.
+func extractSkylinks(input []byte) []string {
 	var maybeSkylinks []string
 
 	// range over the string line by line and extract potential skylinks
-	sc := bufio.NewScanner(bytes.NewBuffer(emailBody))
+	sc := bufio.NewScanner(bytes.NewBuffer(input))
 	for sc.Scan() {
 		line := sc.Text()
 		for _, match := range skylinkRE.FindStringSubmatch(line) {
@@ -282,16 +305,16 @@ func extractSkylinks(emailBody []byte) []string {
 }
 
 // extract tags is a helper function that extracts a set of tags from the given
-// email body
-func extractTags(emailBody []byte) []string {
-	phishing := regexp.MustCompile(`[Pp]hishing`).Find(emailBody) != nil
-	malware := regexp.MustCompile(`[Mm]alware`).Find(emailBody) != nil
-	copyright := regexp.MustCompile(`[Ii]nfringing`).Find(emailBody) != nil
-	copyright = copyright || regexp.MustCompile(`[Cc]opyright`).Find(emailBody) != nil
-	terrorism := regexp.MustCompile(`[Tt]error`).Find(emailBody) != nil
-	csam := regexp.MustCompile(`[Cc]hild`).Find(emailBody) != nil
-	csam = csam || regexp.MustCompile(`CSAM`).Find(emailBody) != nil
-	csam = csam || regexp.MustCompile(`csam`).Find(emailBody) != nil
+// input
+func extractTags(input []byte) []string {
+	phishing := regexp.MustCompile(`[Pp]hishing`).Find(input) != nil
+	malware := regexp.MustCompile(`[Mm]alware`).Find(input) != nil
+	copyright := regexp.MustCompile(`[Ii]nfringing`).Find(input) != nil
+	copyright = copyright || regexp.MustCompile(`[Cc]opyright`).Find(input) != nil
+	terrorism := regexp.MustCompile(`[Tt]error`).Find(input) != nil
+	csam := regexp.MustCompile(`[Cc]hild`).Find(input) != nil
+	csam = csam || regexp.MustCompile(`CSAM`).Find(input) != nil
+	csam = csam || regexp.MustCompile(`csam`).Find(input) != nil
 
 	var tags []string
 	if phishing {
@@ -316,4 +339,27 @@ func extractTags(emailBody []byte) []string {
 	}
 
 	return tags
+}
+
+// extractTextFromHTML is a helper function that parses the given email body,
+// which is expected to contain valid HTML, and returns the contents of all text
+// nodes as a string.
+func extractTextFromHTML(r io.Reader) (string, error) {
+	var text []string
+	tokenizer := html.NewTokenizer(r)
+	for {
+		tt := tokenizer.Next()
+		if tt == html.ErrorToken {
+			if tokenizer.Err() == io.EOF {
+				break
+			}
+			return "", tokenizer.Err()
+		}
+
+		if tt == html.TextToken {
+			text = append(text, strings.TrimSpace(tokenizer.Token().Data))
+		}
+	}
+
+	return strings.Join(text, "\n"), nil
 }
