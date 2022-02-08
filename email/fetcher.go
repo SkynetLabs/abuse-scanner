@@ -4,6 +4,7 @@ import (
 	"abuse-scanner/database"
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"strings"
 	"sync"
@@ -20,6 +21,9 @@ import (
 const (
 	// fetchFrequency defines the frequency with which we fetch new emails
 	fetchFrequency = 30 * time.Second
+
+	// mailMaxBodySize is the maximum amount of bytes read from the email body
+	mailMaxBodySize = 1 << 23 // 8MiB
 )
 
 type (
@@ -300,8 +304,11 @@ func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message,
 		return fmt.Errorf("msg %v has no body", uid)
 	}
 
+	// limit the amount of bytes we read from the body
+	bodyReader := io.LimitReader(bodyLit, mailMaxBodySize)
+
 	// read the imap literal into a byte slice
-	body, err := ioutil.ReadAll(bodyLit)
+	body, err := ioutil.ReadAll(bodyReader)
 	if err != nil {
 		return errors.AddContext(err, "could not read msg body")
 	}
