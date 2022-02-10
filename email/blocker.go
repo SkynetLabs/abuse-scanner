@@ -110,7 +110,7 @@ func (b *Blocker) blockMessages() {
 	// fetch all unblocked emails
 	toBlock, err := abuseDB.FindUnblocked()
 	if err != nil {
-		logger.Errorf("Failed fetching unparsed emails, error %v", err)
+		logger.Errorf("Failed fetching unblocked emails, error %v", err)
 		return
 	}
 

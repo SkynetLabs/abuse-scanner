@@ -172,7 +172,7 @@ func (f *Finalizer) finalizeMessages() {
 	// fetch all unfinalized emails
 	toFinalize, err := abuseDB.FindUnfinalized()
 	if err != nil {
-		logger.Errorf("Failed fetching unparsed emails, error %v", err)
+		logger.Errorf("Failed fetching unfinalized emails, error %v", err)
 		return
 	}
 
