@@ -193,6 +193,12 @@ func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 			if err != nil {
 				return fmt.Sprintf("failed to execute request, err: %v", err.Error())
 			}
+			defer func() {
+				err = resp.Body.Close()
+				if err != nil {
+					b.staticLogger.Errorf("failed to close response body, err: %v", err)
+				}
+			}()
 
 			// handle the response
 			switch resp.StatusCode {
@@ -203,7 +209,6 @@ func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 				if err != nil {
 					return fmt.Sprintf("failed to read response body, err: %v", err.Error())
 				}
-				resp.Body.Close()
 				return fmt.Sprintf("failed to block skylink, status %v response: %v", resp.Status, string(respBody))
 			}
 		}()

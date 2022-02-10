@@ -29,22 +29,22 @@ type (
 	Finalizer struct {
 		staticContext          context.Context
 		staticDatabase         *database.AbuseScannerDB
+		staticEmailAddress     string
 		staticEmailCredentials Credentials
 		staticLogger           *logrus.Entry
 		staticMailbox          string
-		staticMailaddress      string
 		staticWaitGroup        sync.WaitGroup
 	}
 )
 
 // NewFinalizer creates a new finalizer.
-func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, mailaddress, mailbox string, logger *logrus.Logger) *Finalizer {
+func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, emailAddress, mailbox string, logger *logrus.Logger) *Finalizer {
 	return &Finalizer{
 		staticContext:          ctx,
 		staticDatabase:         database,
+		staticEmailAddress:     emailAddress,
 		staticEmailCredentials: emailCredentials,
 		staticLogger:           logger.WithField("module", "Finalizer"),
-		staticMailaddress:      mailaddress,
 		staticMailbox:          mailbox,
 	}
 }
@@ -117,7 +117,7 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 	msg += fmt.Sprintf("References: %s\n", email.MessageID)
 	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
 	msg += fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress)
-	msg += fmt.Sprintf("To:%s\n", f.staticMailaddress)
+	msg += fmt.Sprintf("To:%s\n", f.staticEmailAddress)
 	msg += ""
 	msg += email.String()
 	reader := strings.NewReader(msg)

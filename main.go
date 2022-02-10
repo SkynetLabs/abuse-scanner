@@ -77,10 +77,10 @@ func main() {
 	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
 	fetcher := email.NewFetcher(ctx, db, emailCredentials, abuseMailbox, serverDomain, logger)
-	// err = fetcher.Start()
-	// if err != nil {
-	// 	log.Fatal("Failed to start the email fetcher, err: ", err)
-	// }
+	err = fetcher.Start()
+	if err != nil {
+		log.Fatal("Failed to start the email fetcher, err: ", err)
+	}
 
 	// create a new mail parser, it parses any email that's not parsed yet for
 	// abuse skylinks and a set of abuse tag
@@ -96,10 +96,10 @@ func main() {
 	logger.Info("Initializing blocker...")
 	blockerApiUrl := fmt.Sprintf("http://%s:%s", blockerHost, blockerPort)
 	blocker := email.NewBlocker(ctx, blockerApiUrl, db, logger)
-	// err = blocker.Start()
-	// if err != nil {
-	// 	log.Fatal("Failed to start the blocker, err: ", err)
-	// }
+	err = blocker.Start()
+	if err != nil {
+		log.Fatal("Failed to start the blocker, err: ", err)
+	}
 
 	// create a new finalizer, it finalizes the abuse report for any emails
 	// which are parsed, blocked, but not yet finalized. An email is finalized
@@ -107,10 +107,10 @@ func main() {
 	// have been found and blocked.
 	logger.Info("Initializing finalizer...")
 	finalizer := email.NewFinalizer(ctx, db, emailCredentials, abuseMailaddress, abuseMailbox, logger)
-	// err = finalizer.Start()
-	// if err != nil {
-	// 	log.Fatal("Failed to start the email finalizer, err: ", err)
-	// }
+	err = finalizer.Start()
+	if err != nil {
+		log.Fatal("Failed to start the email finalizer, err: ", err)
+	}
 
 	// catch exit signals
 	exitSignal := make(chan os.Signal, 1)
