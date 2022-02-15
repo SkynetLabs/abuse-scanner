@@ -4,6 +4,7 @@ import (
 	"abuse-scanner/database"
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"strings"
 	"sync"
@@ -20,58 +21,39 @@ import (
 const (
 	// fetchFrequency defines the frequency with which we fetch new emails
 	fetchFrequency = 30 * time.Second
+
+	// mailMaxBodySize is the maximum amount of bytes read from the email body
+	mailMaxBodySize = 1 << 23 // 8MiB
 )
 
 type (
 	// Fetcher is an object that will periodically scan an inbox and persist the
 	// missing messages in the database.
 	Fetcher struct {
-		staticContext                context.Context
-		staticDatabase               *database.AbuseScannerDB
-		staticEmailClient            *client.Client
-		staticEmailClientReconnectFn ReconnectFn
-		staticLogger                 *logrus.Entry
-		staticMailbox                string
-		staticWaitGroup              sync.WaitGroup
+		staticContext          context.Context
+		staticDatabase         *database.AbuseScannerDB
+		staticEmailCredentials Credentials
+		staticLogger           *logrus.Entry
+		staticMailbox          string
+		staticServerDomain     string
+		staticWaitGroup        sync.WaitGroup
 	}
-
-	// ReconnectFn is a helper type that describes a function that reconnects
-	// the email client in case it has dropped its connection.
-	ReconnectFn func() error
 )
 
 // NewFetcher creates a new fetcher.
-func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailbox string, reconnectFn ReconnectFn, logger *logrus.Logger) *Fetcher {
+func NewFetcher(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, mailbox, serverDomain string, logger *logrus.Logger) *Fetcher {
 	return &Fetcher{
-		staticContext:                ctx,
-		staticDatabase:               database,
-		staticEmailClient:            emailClient,
-		staticEmailClientReconnectFn: reconnectFn,
-		staticLogger:                 logger.WithField("module", "Fetcher"),
-		staticMailbox:                mailbox,
+		staticContext:          ctx,
+		staticDatabase:         database,
+		staticEmailCredentials: emailCredentials,
+		staticLogger:           logger.WithField("module", "Fetcher"),
+		staticMailbox:          mailbox,
+		staticServerDomain:     serverDomain,
 	}
 }
 
 // Start initializes the fetch process.
 func (f *Fetcher) Start() error {
-	// list mailboxes
-	mailboxes, err := f.listMailboxes()
-	if err != nil {
-		return err
-	}
-
-	// check whether the mailbox exists
-	found := false
-	for _, m := range mailboxes {
-		if m == f.staticMailbox {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("mailbox '%v' not found", f.staticMailbox)
-	}
-
 	f.staticWaitGroup.Add(1)
 	go func() {
 		f.threadedFetchMessages()
@@ -95,112 +77,168 @@ func (f *Fetcher) Stop() error {
 	}
 }
 
-// listMailboxes returns all IMAP mailboxes
-func (f *Fetcher) listMailboxes() ([]string, error) {
-	// convenience variables
-	email := f.staticEmailClient
-
-	// list all mailboxes
-	mailboxesChan := make(chan *imap.MailboxInfo, 10)
-	done := make(chan error, 1)
-	go func() {
-		done <- email.List("", "*", mailboxesChan)
-	}()
-
-	// add all inboxes to an array
-	mailboxes := make([]string, 0)
-	for m := range mailboxesChan {
-		mailboxes = append(mailboxes, m.Name)
-	}
-
-	// check whether an error occurred
-	err := <-done
-	if err != nil {
-		return nil, err
-	}
-	return mailboxes, nil
-}
-
 // threadedFetchMessages will periodically fetch new messages from the mailbox.
 func (f *Fetcher) threadedFetchMessages() {
 	// convenience variables
 	logger := f.staticLogger
 
+	// create a ticker
 	ticker := time.NewTicker(fetchFrequency)
-	first := true
+
+	// log information about the mailbox we're fetching from
+	logger.Infof("Fetching messages for '%v' from mailbox '%v'", f.staticEmailCredentials.Username, f.staticMailbox)
 
 	// start the loop
 	for {
-		// sleep until next iteration, sleeping at the start of the for loop
-		// allows to 'continue' on error.
-		if !first {
-			select {
-			case <-f.staticContext.Done():
-				logger.Debugln("Fetcher context done")
-				return
-			case <-ticker.C:
-			}
-		}
-		first = false
+		logger.Debugln("threadedFetchMessages loop iteration triggered")
+		f.fetchMessages()
 
-		logger.Debugln("Triggered")
-
-		// select the mailbox in every iteration (the uid validity might change)
-		mailbox, err := f.staticEmailClient.Select(f.staticMailbox, false)
-
-		// try reconnecting on error
-		if err != nil {
-			logger.Debugln("Failed selecting mailbox, reconnecting")
-			if err := f.staticEmailClientReconnectFn(); err != nil {
-				logger.Errorf("Failed reconnecting, error %v\n", err)
-			} else {
-				// on successful reconnect, reselect the mailbox
-				logger.Debugln("reconnect succeeded, selecting mailbox")
-				mailbox, err = f.staticEmailClient.Select(f.staticMailbox, false)
-			}
-		}
-		if err != nil {
-			logger.Errorf("Failed selecting mailbox %v, error %v\n", f.staticMailbox, err)
-			continue
-		}
-
-		// get all message ids
-		msgs, err := f.getMessageIds()
-		if err != nil {
-			logger.Errorf("Failed listing messages, error %v", err)
-			continue
-		}
-
-		// get missing messages
-		missing, err := f.getMessagesToFetch(mailbox, msgs)
-		if err != nil {
-			logger.Errorf("Failed listing messages, error %v", err)
-		}
-
-		// log missing messages count
-		numMissing := len(missing)
-		if numMissing == 0 {
-			logger.Debugf("Found %v missing messages", numMissing)
-			continue
-		}
-		logger.Infof("Found %v missing messages", numMissing)
-
-		// fetch messages
-		for _, msgUid := range missing {
-			seqSet := new(imap.SeqSet)
-			seqSet.AddNum(msgUid)
-			err := f.fetchMessages(mailbox, seqSet)
-			if err != nil {
-				logger.Errorf("Failed fetching message %v, error %v", msgUid, err)
-			}
+		// sleep until next iteration
+		select {
+		case <-f.staticContext.Done():
+			logger.Debugln("Fetcher context done")
+			return
+		case <-ticker.C:
 		}
 	}
 }
 
-// getMessageIds lists all messages in the current mailbox
-func (f *Fetcher) getMessageIds() ([]uint32, error) {
+// fetchMessages connects to the mailbox and downloads messages it has not seen
+// yet. It will store these as abuse emails in the database.
+func (f *Fetcher) fetchMessages() {
 	// convenience variables
-	email := f.staticEmailClient
+	logger := f.staticLogger
+
+	// create an email client
+	client, err := NewClient(f.staticEmailCredentials)
+	if err != nil && strings.Contains(err.Error(), ErrTooManyConnections.Error()) {
+		logger.Debugf("Skipped due to Too Many Connections (expected)")
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to initialize email client, err %v", err)
+		return
+	}
+
+	// defer a logout
+	defer func() {
+		err := client.Logout()
+		if err != nil {
+			logger.Errorf("Failed to close email client, err: %v", err)
+		}
+	}()
+
+	// select the mailbox, we have to do this in every iteration as the
+	// uid validity might change
+	mailbox, err := client.Select(f.staticMailbox, false)
+	if err != nil {
+		logger.Errorf("Failed to select mailbox %v, err: %v", f.staticMailbox, err)
+		return
+	}
+
+	// return early if the mailbox has no messages
+	if mailbox.Messages == 0 {
+		logger.Debugf("No messages in mailbox %v", f.staticMailbox)
+		return
+	}
+
+	// get all message ids
+	msgs, err := f.getMessageIds(client)
+	if err != nil {
+		logger.Errorf("Failed getting messages ids, err: %v", err)
+		return
+	}
+
+	// get missing messages
+	missing, err := f.getMessagesToFetch(mailbox, msgs)
+	if err != nil {
+		logger.Errorf("Failed listing messages, err: %v", err)
+		return
+	}
+
+	// log missing messages count
+	numMissing := len(missing)
+	if numMissing == 0 {
+		logger.Debugf("Found %v missing messages", numMissing)
+		return
+	}
+
+	// fetch messages
+	logger.Infof("Found %v missing messages", numMissing)
+	for _, msgUid := range missing {
+		seqSet := new(imap.SeqSet)
+		seqSet.AddNum(msgUid)
+		err := f.fetchMessagesByUid(client, mailbox, seqSet)
+		if err != nil {
+			logger.Errorf("Failed fetching message %v, err: %v", msgUid, err)
+		}
+	}
+}
+
+// fetchMessagesByUid fetches all messages in the given seq set and persists
+// them in the database
+func (f *Fetcher) fetchMessagesByUid(client *client.Client, mailbox *imap.MailboxStatus, toFetch *imap.SeqSet) error {
+	// convenience variables
+	logger := f.staticLogger
+
+	messageChan := make(chan *imap.Message)
+	section, err := imap.ParseBodySectionName("BODY[]")
+	if err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- client.UidFetch(toFetch, []imap.FetchItem{imap.FetchEnvelope, section.FetchItem()}, messageChan)
+	}()
+
+	toUnsee := new(imap.SeqSet)
+	for msg := range messageChan {
+		// skip messages that have been sent by the abuse scanner itself, since
+		// we reply to the original email those replies are picked up by the
+		// scanner as well
+		if isFromAbuseScanner(msg) {
+			logger.Debugf("skip message from abuse scanner (expected)")
+			err := f.persistSkipMessage(mailbox, msg)
+			if err != nil {
+				logger.Errorf("Failed to persist skip message, error: %v", err)
+			}
+			continue
+		}
+
+		// skip messages without body
+		//
+		// TODO: side-effect from UidFetch and can probably be avoided
+		if !hasBody(msg) {
+			logger.Debugf("skip message due to not having a body (expected)")
+			err := f.persistSkipMessage(mailbox, msg)
+			if err != nil {
+				logger.Errorf("Failed to persist skip message, error: %v", err)
+			}
+			continue
+		}
+
+		toUnsee.AddNum(msg.Uid)
+		err := f.persistMessage(mailbox, msg, section)
+		if err != nil {
+			logger.Errorf("Failed to persist %v, error: %v", msg.Uid, err)
+		}
+	}
+
+	// unsee messages
+	flags := []interface{}{imap.SeenFlag}
+	err = client.UidStore(toUnsee, "-FLAGS.SILENT", flags, nil)
+	if err != nil && !strings.Contains(err.Error(), "Could not parse command") {
+		logger.Debugf("Failed to unsee messages, error: %v", err)
+	} else {
+		logger.Debugln("Successfully unseen messages")
+	}
+
+	// return the (possible) error value from the done channel
+	return <-done
+}
+
+// getMessageIds lists all messages in the current mailbox
+func (f *Fetcher) getMessageIds(email *client.Client) ([]uint32, error) {
+	// convenience variables
 	logger := f.staticLogger
 
 	// construct seq set
@@ -214,7 +252,7 @@ func (f *Fetcher) getMessageIds() ([]uint32, error) {
 	go func() {
 		err = email.Fetch(seqset, []imap.FetchItem{imap.FetchUid}, messageChan)
 		if err != nil {
-			logger.Errorf("Failed listing messages, error: %v\n", err)
+			logger.Errorf("Failed listing messages, error: %v", err)
 		}
 	}()
 
@@ -252,68 +290,6 @@ func (f *Fetcher) getMessagesToFetch(mailbox *imap.MailboxStatus, msgs []uint32)
 	return toFetch, nil
 }
 
-// fetchMessages fetches all messages in the given seq set and persists them in // the database
-func (f *Fetcher) fetchMessages(mailbox *imap.MailboxStatus, toFetch *imap.SeqSet) error {
-	// convenience variables
-	email := f.staticEmailClient
-	logger := f.staticLogger
-
-	messageChan := make(chan *imap.Message)
-	section, err := imap.ParseBodySectionName("BODY[]")
-	if err != nil {
-		return err
-	}
-	done := make(chan error, 1)
-	go func() {
-		done <- email.UidFetch(toFetch, []imap.FetchItem{imap.FetchEnvelope, section.FetchItem()}, messageChan)
-	}()
-
-	toUnsee := new(imap.SeqSet)
-	for msg := range messageChan {
-		// skip messages that have been sent by the abuse scanner itself, since
-		// we reply to the original email those replies are picked up by the
-		// scanner as well
-		if isFromAbuseScanner(msg) {
-			logger.Debugf("skip message from abuse scanner (expected)")
-			err := f.persistSkipMessage(mailbox, msg)
-			if err != nil {
-				logger.Errorf("Failed to persist skip message, error: %v\n", err)
-			}
-			continue
-		}
-
-		// skip messages without body
-		//
-		// TODO: side-effect from UidFetch and can probably be avoided
-		if !hasBody(msg) {
-			logger.Debugf("skip message due to not having a body (expected)")
-			err := f.persistSkipMessage(mailbox, msg)
-			if err != nil {
-				logger.Errorf("Failed to persist skip message, error: %v\n", err)
-			}
-			continue
-		}
-
-		toUnsee.AddNum(msg.Uid)
-		err := f.persistMessage(mailbox, msg, section)
-		if err != nil {
-			logger.Errorf("Failed to persist %v, error: %v\n", msg.Uid, err)
-		}
-	}
-
-	// unsee messages
-	flags := []interface{}{imap.SeenFlag}
-	err = email.UidStore(toUnsee, "-FLAGS.SILENT", flags, nil)
-	if err != nil && !strings.Contains(err.Error(), "Could not parse command") {
-		logger.Debugf("Failed to unsee messages, error: %v\n", err)
-	} else {
-		logger.Debugln("Successfully unseen messages")
-	}
-
-	// return the (possible) error value from the done channel
-	return <-done
-}
-
 // persistMessage will persist the given message in the abuse scanner database
 func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message, section *imap.BodySectionName) error {
 	// convenience variables
@@ -327,7 +303,12 @@ func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message,
 	if bodyLit == nil {
 		return fmt.Errorf("msg %v has no body", uid)
 	}
-	body, err := ioutil.ReadAll(bodyLit)
+
+	// limit the amount of bytes we read from the body
+	bodyReader := io.LimitReader(bodyLit, mailMaxBodySize)
+
+	// read the imap literal into a byte slice
+	body, err := ioutil.ReadAll(bodyReader)
 	if err != nil {
 		return errors.AddContext(err, "could not read msg body")
 	}
@@ -352,6 +333,7 @@ func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message,
 		Blocked:   false,
 		Finalized: false,
 
+		InsertedBy: f.staticServerDomain,
 		InsertedAt: time.Now().UTC(),
 	}
 

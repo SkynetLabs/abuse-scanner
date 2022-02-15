@@ -26,12 +26,11 @@ type (
 	// Blocker is an object that will periodically scan the database for abuse
 	// reports that have not been blocked yet.
 	Blocker struct {
-		staticBlockerApiUrl     string
-		staticBlockerAuthHeader string
-		staticContext           context.Context
-		staticDatabase          *database.AbuseScannerDB
-		staticLogger            *logrus.Entry
-		staticWaitGroup         sync.WaitGroup
+		staticBlockerApiUrl string
+		staticContext       context.Context
+		staticDatabase      *database.AbuseScannerDB
+		staticLogger        *logrus.Entry
+		staticWaitGroup     sync.WaitGroup
 	}
 
 	// BlockPOST is the datastructure expected by the blocker API
@@ -43,13 +42,12 @@ type (
 )
 
 // NewBlocker creates a new blocker.
-func NewBlocker(ctx context.Context, blockerAuthHeader, blockerApiUrl string, database *database.AbuseScannerDB, logger *logrus.Logger) *Blocker {
+func NewBlocker(ctx context.Context, blockerApiUrl string, database *database.AbuseScannerDB, logger *logrus.Logger) *Blocker {
 	return &Blocker{
-		staticBlockerAuthHeader: blockerAuthHeader,
-		staticBlockerApiUrl:     blockerApiUrl,
-		staticContext:           ctx,
-		staticDatabase:          database,
-		staticLogger:            logger.WithField("module", "Blocker"),
+		staticBlockerApiUrl: blockerApiUrl,
+		staticContext:       ctx,
+		staticDatabase:      database,
+		staticLogger:        logger.WithField("module", "Blocker"),
 	}
 }
 
@@ -82,90 +80,104 @@ func (b *Blocker) Stop() error {
 // been blocked yet and feed them to the blocker API.
 func (b *Blocker) threadedBlockMessages() {
 	// convenience variables
-	abuseDB := b.staticDatabase
 	logger := b.staticLogger
 
+	// create a new ticker
 	ticker := time.NewTicker(blockFrequency)
-	first := true
 
 	// start the loop
 	for {
-		// sleep until next iteration, sleeping at the start of the for loop
-		// allows to 'continue' on error.
-		if !first {
-			select {
-			case <-b.staticContext.Done():
-				logger.Debugln("Blocker context done")
-				return
-			case <-ticker.C:
-			}
-		}
-		first = false
+		logger.Debugln("threadedBlockMessages loop iteration triggered")
+		b.blockMessages()
 
-		logger.Debugln("Triggered")
-
-		// fetch all unblocked emails
-		toBlock, err := abuseDB.FindUnblocked()
-		if err != nil {
-			logger.Errorf("Failed fetching unparsed emails, error %v", err)
+		select {
+		case <-b.staticContext.Done():
+			logger.Debugln("Blocker context done")
 			return
-		}
-
-		// log unblocked messages count
-		numUnblocked := len(toBlock)
-		if numUnblocked == 0 {
-			logger.Debugf("Found %v unblocked messages\n", numUnblocked)
-			continue
-		}
-		logger.Infof("Found %v unblocked messages\n", numUnblocked)
-
-		// loop all emails and parse them
-		for _, email := range toBlock {
-			err = func() (err error) {
-				lock := abuseDB.NewLock(email.UID)
-				err = lock.Lock()
-				if err != nil {
-					return errors.AddContext(err, "could not acquire lock")
-				}
-				defer func() {
-					unlockErr := lock.Unlock()
-					if unlockErr != nil {
-						err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
-						return
-					}
-				}()
-
-				// parse the email
-				result := b.blockReport(email.ParseResult)
-
-				// sanity check we have a result for every skylink
-				if len(result) != len(email.ParseResult.Skylinks) {
-					return errors.New("block result not defined for every skylink")
-				}
-
-				// update the email
-				err = abuseDB.UpdateNoLock(email,
-					bson.D{
-						{"$set", bson.D{
-							{"blocked", true},
-							{"block_result", result},
-						}},
-					},
-				)
-				if err != nil {
-					return errors.AddContext(err, "could not update email")
-				}
-				return nil
-			}()
-			if err != nil {
-				logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
-			}
+		case <-ticker.C:
 		}
 	}
 }
 
+// blockMessages is executed on every iteration of the loop in
+// threadedBlockMessages, it will scan for emails for which the skylinks have
+// not been blocked yet and attempt to block them.
+func (b *Blocker) blockMessages() {
+	// convenience variables
+	abuseDB := b.staticDatabase
+	logger := b.staticLogger
+
+	// fetch all unblocked emails
+	toBlock, err := abuseDB.FindUnblocked()
+	if err != nil {
+		logger.Errorf("Failed fetching unblocked emails, error %v", err)
+		return
+	}
+
+	// log unblocked messages count
+	numUnblocked := len(toBlock)
+	if numUnblocked == 0 {
+		logger.Debugf("Found %v unblocked messages", numUnblocked)
+		return
+	}
+
+	logger.Infof("Found %v unblocked messages", numUnblocked)
+
+	// loop all emails and block the skylinks they contain
+	for _, email := range toBlock {
+		err := b.blockEmail(email)
+		if err != nil {
+			logger.Errorf("Failed to parse email %v, error %v", email.UID, err)
+		}
+	}
+}
+
+// blockEmail will block the skylinks that are contained in the parse result of
+// the given email.
+func (b *Blocker) blockEmail(email database.AbuseEmail) (err error) {
+	// convenience variables
+	abuseDB := b.staticDatabase
+
+	// acquire the lock
+	lock := abuseDB.NewLock(email.UID)
+	err = lock.Lock()
+	if err != nil {
+		return errors.AddContext(err, "could not acquire lock")
+	}
+
+	// defer the release
+	defer func() {
+		unlockErr := lock.Unlock()
+		if unlockErr != nil {
+			err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
+			return
+		}
+	}()
+
+	// block the skylinks from the parse result
+	result, err := b.blockReport(email.ParseResult)
+	if err != nil {
+		return errors.AddContext(err, "failed blocking skylinks in the parse result")
+	}
+
+	// update the email
+	err = abuseDB.UpdateNoLock(email,
+		bson.D{
+			{"$set", bson.D{
+				{"blocked", true},
+				{"blocked_at", time.Now().UTC()},
+				{"block_result", result},
+			}},
+		},
+	)
+	if err != nil {
+		return errors.AddContext(err, "could not update email")
+	}
+	return nil
+}
+
 // blockReport will block all skylinks from the given abuse report.
-func (b *Blocker) blockReport(report database.AbuseReport) []string {
+func (b *Blocker) blockReport(report database.AbuseReport) ([]string, error) {
 	var results []string
 	for _, skylink := range report.Skylinks {
 		result := func() string {
@@ -176,11 +188,17 @@ func (b *Blocker) blockReport(report database.AbuseReport) []string {
 			}
 
 			// execute the request
-			b.staticLogger.Debugf("blocking %v", skylink)
+			b.staticLogger.Debugf("blocking %v...%v", skylink[:4], skylink[len(skylink)-4:])
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				return fmt.Sprintf("failed to execute request, err: %v", err.Error())
 			}
+			defer func() {
+				err = resp.Body.Close()
+				if err != nil {
+					b.staticLogger.Errorf("failed to close response body, err: %v", err)
+				}
+			}()
 
 			// handle the response
 			switch resp.StatusCode {
@@ -191,14 +209,18 @@ func (b *Blocker) blockReport(report database.AbuseReport) []string {
 				if err != nil {
 					return fmt.Sprintf("failed to read response body, err: %v", err.Error())
 				}
-				resp.Body.Close()
 				return fmt.Sprintf("failed to block skylink, status %v response: %v", resp.Status, string(respBody))
 			}
 		}()
 		results = append(results, result)
 	}
 
-	return results
+	// sanity check we have a result for every skylink
+	if len(results) != len(report.Skylinks) {
+		return nil, errors.New("block result not defined for every skylink")
+	}
+
+	return results, nil
 }
 
 // buildBlockRequest builds a request to be sent to the blocker API using the
@@ -225,11 +247,6 @@ func (b *Blocker) buildBlockRequest(skylink string, report database.AbuseReport)
 	}
 
 	// add the headers
-	//
-	// TODO: we don't even need the auth header here seeing as we removed
-	// authentication from that route in the blocker API, I left it here anyway
-	// as we might bring that back in the future
-	// req.Header.Set("Authorization", b.staticBlockerAuthHeader)
 	req.Header.Set("User-Agent", "Sia-Agent")
 	return req, nil
 }

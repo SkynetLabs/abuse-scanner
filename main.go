@@ -30,12 +30,8 @@ func main() {
 	abuseMailaddress := os.Getenv("ABUSE_MAILADDRESS")
 	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
 	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
-	emailServer := os.Getenv("EMAIL_SERVER")
-	emailUsername := os.Getenv("EMAIL_USERNAME")
-	emailPassword := os.Getenv("EMAIL_PASSWORD")
 	blockerHost := os.Getenv("BLOCKER_HOST")
 	blockerPort := os.Getenv("BLOCKER_PORT")
-	blockerAuthHeader := os.Getenv("BLOCKER_AUTH_HEADER")
 	serverDomain := os.Getenv("SERVER_DOMAIN")
 
 	// TODO: validate env variables
@@ -66,39 +62,21 @@ func main() {
 		log.Fatal("Failed to load mongo database credentials", err)
 	}
 
-	db, err := database.NewAbuseScannerDB(ctx, serverDomain, mongoUri, mongoCreds, logger)
+	// create a database instance
+	db, err := database.NewAbuseScannerDB(ctx, serverDomain, mongoUri, database.DBAbuseScanner, mongoCreds, logger)
 	if err != nil {
-		log.Fatal("Failed to initialize database client", err)
+		log.Fatalf("Failed to initialize database client, err: %v", err)
 	}
 
-	// create an email client
-	logger.Info("Initializing email client...")
-	mail, err := email.NewClient(emailServer, emailUsername, emailPassword)
+	// load email credentials
+	emailCredentials, err := loadEmailCredentials()
 	if err != nil {
-		log.Fatal("Failed to initialize email client", err)
-	}
-
-	// defer logout
-	defer func() {
-		err := mail.Logout()
-		if err != nil {
-			logger.Infof("Failed logging out, error: %v", err)
-		}
-	}()
-
-	// define a function that reconnects the email client
-	reconnectFn := func() error {
-		_ = mail.Logout() // attempt logout and don't care about the error
-		mail, err = email.NewClient(emailServer, emailUsername, emailPassword)
-		if err != nil {
-			return err
-		}
-		return nil
+		log.Fatal("Failed to load email credentials", err)
 	}
 
 	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
-	fetcher := email.NewFetcher(ctx, db, mail, abuseMailbox, reconnectFn, logger)
+	fetcher := email.NewFetcher(ctx, db, emailCredentials, abuseMailbox, serverDomain, logger)
 	err = fetcher.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email fetcher, err: ", err)
@@ -117,7 +95,7 @@ func main() {
 	// parsed but not blocked yet, it uses the blocker API for this.
 	logger.Info("Initializing blocker...")
 	blockerApiUrl := fmt.Sprintf("http://%s:%s", blockerHost, blockerPort)
-	blocker := email.NewBlocker(ctx, blockerAuthHeader, blockerApiUrl, db, logger)
+	blocker := email.NewBlocker(ctx, blockerApiUrl, db, logger)
 	err = blocker.Start()
 	if err != nil {
 		log.Fatal("Failed to start the blocker, err: ", err)
@@ -128,7 +106,7 @@ func main() {
 	// when the abuse scanner has replied with a report of all the skylinks that
 	// have been found and blocked.
 	logger.Info("Initializing finalizer...")
-	finalizer := email.NewFinalizer(ctx, db, mail, abuseMailaddress, abuseMailbox, logger)
+	finalizer := email.NewFinalizer(ctx, db, emailCredentials, abuseMailaddress, abuseMailbox, logger)
 	err = finalizer.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email finalizer, err: ", err)
@@ -155,8 +133,9 @@ func main() {
 	logger.Info("Abuse Scanner Terminated.")
 }
 
-// loadDBCredentials creates a new db connection based on credentials found in
-// the environment variables.
+// loadDBCredentials is a helper function that loads the mongo db credentials
+// from the environment. If any of the values are empty, it returns an error
+// that indicates what env variable is missing.
 func loadDBCredentials() (string, options.Credential, error) {
 	var creds options.Credential
 	var ok bool
@@ -174,4 +153,22 @@ func loadDBCredentials() (string, options.Credential, error) {
 		return "", options.Credential{}, errors.New("missing env var SKYNET_DB_PORT")
 	}
 	return fmt.Sprintf("mongodb://%v:%v", host, port), creds, nil
+}
+
+// loadEmailCredentials is a helper function that loads the email credentials
+// from the environment. If any of the values are empty, it returns an error
+// that indicates what env variable is missing.
+func loadEmailCredentials() (email.Credentials, error) {
+	var creds email.Credentials
+	var ok bool
+	if creds.Address, ok = os.LookupEnv("EMAIL_SERVER"); !ok {
+		return email.Credentials{}, errors.New("missing env var 'EMAIL_SERVER'")
+	}
+	if creds.Username, ok = os.LookupEnv("EMAIL_USERNAME"); !ok {
+		return email.Credentials{}, errors.New("missing env var 'EMAIL_USERNAME'")
+	}
+	if creds.Password, ok = os.LookupEnv("EMAIL_PASSWORD"); !ok {
+		return email.Credentials{}, errors.New("missing env var 'EMAIL_PASSWORD'")
+	}
+	return creds, nil
 }

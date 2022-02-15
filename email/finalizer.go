@@ -17,7 +17,7 @@ import (
 
 const (
 	// finalizeFrequency defines the frequency with which we finalize reports
-	finalizeFrequency = 20 * time.Second
+	finalizeFrequency = 30 * time.Second
 
 	// scannerEmailAddress is the from email we use when sending abuse reports
 	scannerEmailAddress = "abuse-scanner@siasky.net"
@@ -27,25 +27,25 @@ type (
 	// Finalizer is an object that will periodically scan the database for abuse
 	// reports that have not been finalized yet.
 	Finalizer struct {
-		staticContext     context.Context
-		staticDatabase    *database.AbuseScannerDB
-		staticEmailClient *client.Client
-		staticMailbox     string
-		staticMailaddress string
-		staticLogger      *logrus.Entry
-		staticWaitGroup   sync.WaitGroup
+		staticContext          context.Context
+		staticDatabase         *database.AbuseScannerDB
+		staticEmailAddress     string
+		staticEmailCredentials Credentials
+		staticLogger           *logrus.Entry
+		staticMailbox          string
+		staticWaitGroup        sync.WaitGroup
 	}
 )
 
 // NewFinalizer creates a new finalizer.
-func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailClient *client.Client, mailaddress, mailbox string, logger *logrus.Logger) *Finalizer {
+func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, emailAddress, mailbox string, logger *logrus.Logger) *Finalizer {
 	return &Finalizer{
-		staticContext:     ctx,
-		staticDatabase:    database,
-		staticEmailClient: emailClient,
-		staticMailaddress: mailaddress,
-		staticMailbox:     mailbox,
-		staticLogger:      logger.WithField("module", "Finalizer"),
+		staticContext:          ctx,
+		staticDatabase:         database,
+		staticEmailAddress:     emailAddress,
+		staticEmailCredentials: emailCredentials,
+		staticLogger:           logger.WithField("module", "Finalizer"),
+		staticMailbox:          mailbox,
 	}
 }
 
@@ -74,114 +74,145 @@ func (f *Finalizer) Stop() error {
 	}
 }
 
-// threadedFinalizeMessages will periodically fetch email messages that have not
-// been finalized yet and process them.
-func (f *Finalizer) threadedFinalizeMessages() {
+// finalizeEmail will finalize the given email, it does so by responding to the
+// email with a report that shows an overview of what skylinks were found and
+// whether or not they got blocked successfully.
+func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEmail) (err error) {
+	// sanity check every skylink has a blocked status
+	if len(email.BlockResult) != len(email.ParseResult.Skylinks) {
+		return fmt.Errorf("blockresult vs parseresult length, %v != %v, email with id %v", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
+	}
+
 	// convenience variables
 	abuseDB := f.staticDatabase
 	logger := f.staticLogger
 
-	ticker := time.NewTicker(finalizeFrequency)
-	first := true
+	// acquire a lock
+	lock := abuseDB.NewLock(email.UID)
+	err = lock.Lock()
+	if err != nil {
+		return errors.AddContext(err, "could not acquire lock")
+	}
 
-	// start the loop
-	for {
-		// sleep until next iteration, sleeping at the start of the for loop
-		// allows to 'continue' on error.
-		if !first {
-			select {
-			case <-f.staticContext.Done():
-				logger.Debugln("Finalizer context done")
-				return
-			case <-ticker.C:
-			}
-		}
-		first = false
-
-		logger.Debugln("Triggered")
-
-		// fetch all unfinalized emails
-		toFinalize, err := abuseDB.FindUnfinalized()
-		if err != nil {
-			logger.Errorf("Failed fetching unparsed emails, error %v", err)
+	// defer the unlock
+	defer func() {
+		unlockErr := lock.Unlock()
+		if unlockErr != nil {
+			err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
 			return
 		}
-
-		// log unfinalized message count
-		numUnfinalized := len(toFinalize)
-		if numUnfinalized == 0 {
-			logger.Debugf("Found %v unfinalized messages\n", numUnfinalized)
-			continue
-		}
-		logger.Infof("Found %v unfinalized messages\n", numUnfinalized)
-
-		// loop all emails and parse them
-		for _, email := range toFinalize {
-			if len(email.BlockResult) != len(email.ParseResult.Skylinks) {
-				logger.Errorf("blockresult vs parseresult length, %v != %v, email with id %v\n", len(email.BlockResult), len(email.ParseResult.Skylinks), email.ID.String())
-				continue
-			}
-			err = func() (err error) {
-				lock := abuseDB.NewLock(email.UID)
-				err = lock.Lock()
-				if err != nil {
-					return errors.AddContext(err, "could not acquire lock")
-				}
-				defer func() {
-					unlockErr := lock.Unlock()
-					if unlockErr != nil {
-						err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
-						return
-					}
-				}()
-
-				// finalize the email
-				err = f.finalizeEmail(email)
-				if err != nil {
-					return err
-				}
-
-				// update the email
-				err = abuseDB.UpdateNoLock(email, bson.D{
-					{"$set", bson.D{
-						{"finalized", true},
-					}},
-				})
-				if err != nil {
-					return errors.AddContext(err, "could not update email")
-				}
-
-				return nil
-			}()
-			if err != nil {
-				logger.Errorf("Failed to finalize email %v, error %v", email.UID, err)
-			}
-		}
-	}
-}
-
-// finalizeEmail will finalize the given abuse email
-func (f *Finalizer) finalizeEmail(email database.AbuseEmail) error {
-	// convenience variables
-	logger := f.staticLogger
-	emailClient := f.staticEmailClient
+	}()
 
 	// generate a uuid as message id
-	u, err := uuid.NewV4()
+	var u *uuid.UUID
+	u, err = uuid.NewV4()
 	if err != nil {
 		logger.Errorf("failed to generate uid, err %v", err)
 		return err
 	}
 
-	// append an email with the abuse report result
+	// construct the email message
 	msg := fmt.Sprintf("Subject: Re: %s\n", email.Subject)
 	msg += fmt.Sprintf("Message-ID: <%s@abusescanner\n", u)
 	msg += fmt.Sprintf("References: %s\n", email.MessageID)
 	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
 	msg += fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress)
-	msg += fmt.Sprintf("To:%s\n", f.staticMailaddress)
+	msg += fmt.Sprintf("To:%s\n", f.staticEmailAddress)
 	msg += ""
 	msg += email.String()
 	reader := strings.NewReader(msg)
-	return emailClient.Append(f.staticMailbox, nil, time.Now(), reader)
+
+	// append an email with the abuse report result
+	err = client.Append(f.staticMailbox, nil, time.Now(), reader)
+	if err != nil {
+		return err
+	}
+
+	// update the email
+	err = abuseDB.UpdateNoLock(email, bson.D{
+		{"$set", bson.D{
+			{"finalized", true},
+			{"finalized_at", time.Now().UTC()},
+		}},
+	})
+	if err != nil {
+		return errors.AddContext(err, "could not update email")
+	}
+
+	return nil
+}
+
+// finalizeMessages fetches all unfinalized messages from the database and
+// finalizes them. Finalizing means responding to the original abuse email with
+// an overview of what skylinks the abuse scanner discovered and what skylinks
+// have been blocked.
+func (f *Finalizer) finalizeMessages() {
+	// convenience variables
+	abuseDB := f.staticDatabase
+	logger := f.staticLogger
+
+	// create an email client
+	client, err := NewClient(f.staticEmailCredentials)
+	if err != nil && strings.Contains(err.Error(), ErrTooManyConnections.Error()) {
+		logger.Debugf("Skipped due to Too Many Connections (expected)")
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to initialize email client, err %v", err)
+		return
+	}
+
+	// defer a logout
+	defer func() {
+		err := client.Logout()
+		if err != nil {
+			logger.Errorf("Failed to close email client, err: %v", err)
+		}
+	}()
+
+	// fetch all unfinalized emails
+	toFinalize, err := abuseDB.FindUnfinalized()
+	if err != nil {
+		logger.Errorf("Failed fetching unfinalized emails, error %v", err)
+		return
+	}
+
+	// log unfinalized message count
+	numUnfinalized := len(toFinalize)
+	if numUnfinalized == 0 {
+		logger.Debugf("Found %v unfinalized messages", numUnfinalized)
+		return
+	}
+
+	logger.Infof("Found %v unfinalized messages", numUnfinalized)
+
+	// loop all emails and parse them
+	for _, email := range toFinalize {
+		err := f.finalizeEmail(client, email)
+		if err != nil {
+			logger.Errorf("Failed to finalize email %v, error %v", email.UID, err)
+		}
+	}
+}
+
+// threadedFinalizeMessages will periodically fetch email messages that have not
+// been finalized yet and process them.
+func (f *Finalizer) threadedFinalizeMessages() {
+	// convenience variables
+	logger := f.staticLogger
+
+	// create a new ticker
+	ticker := time.NewTicker(finalizeFrequency)
+
+	// start the loop
+	for {
+		logger.Debugln("threadedFinalizeMessages loop iteration triggered")
+		f.finalizeMessages()
+
+		select {
+		case <-f.staticContext.Done():
+			logger.Debugln("Finalizer context done")
+			return
+		case <-ticker.C:
+		}
+	}
 }
