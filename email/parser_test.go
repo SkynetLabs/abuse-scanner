@@ -64,9 +64,33 @@ func TestParser(t *testing.T) {
 	t.Parallel()
 
 	t.Run("BuildAbuseReport", testBuildAbuseReport)
+	t.Run("Dedupe", testDedupe)
 	t.Run("ExtractSkylinks", testExtractSkylinks)
 	t.Run("ExtractTags", testExtractTags)
 	t.Run("ExtractTextFromHTML", testExtractTextFromHTML)
+}
+
+// testDedupe is a unit test that verifies the behaviour of the 'dedupe' helper
+// function
+func testDedupe(t *testing.T) {
+	t.Parallel()
+
+	input := []string{}
+	output := dedupe(input)
+	if len(output) != len(input) {
+		t.Fatal("unexpected output", output)
+	}
+
+	input = []string{"a", "b", "a"}
+	output = dedupe(input)
+	sort.Strings(output)
+
+	if len(output) != 2 {
+		t.Fatal("unexpected output", output)
+	}
+	if output[0] != "a" || output[1] != "b" {
+		t.Fatal("unexpected output", output)
+	}
 }
 
 // testExtractSkylinks is a unit test that verifies the behaviour of the
@@ -83,6 +107,7 @@ func testExtractSkylinks(t *testing.T) {
 	// extract skylinks
 	skylinks = extractSkylinks(exampleBody)
 	if len(skylinks) != 4 {
+		t.Log(skylinks)
 		t.Fatalf("unexpected amount of skylinks found, %v != 4", len(skylinks))
 	}
 
@@ -112,7 +137,7 @@ func testExtractSkylinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if skylinks[0] != sl.String() {
-		t.Fatal("unexpected skylinks", skylinks)
+		t.Fatal("unexpected skylinks", skylinks, sl.String())
 	}
 }
 

@@ -155,10 +155,10 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 
 	// return a report
 	return database.AbuseReport{
-		Skylinks: skylinks,
+		Skylinks: dedupe(skylinks),
 		Reporter: reporter,
 		Sponsor:  p.staticSponsor,
-		Tags:     tags,
+		Tags:     dedupe(tags),
 	}, nil
 }
 
@@ -285,23 +285,34 @@ func extractSkylinks(input []byte) []string {
 		}
 	}
 
-	// dedupe skylinks and validate them using `LoadString`
-	skylinksMap := make(map[string]struct{}, 0)
-	for _, maybeSkylink := range maybeSkylinks {
+	// add the potential skylinks to a list of skylinks if LoadString succeeds
+	var skylinks []string
+	for _, skylink := range maybeSkylinks {
 		var sl skymodules.Skylink
-		err := sl.LoadString(maybeSkylink)
+		err := sl.LoadString(skylink)
 		if err == nil {
-			skylinksMap[sl.String()] = struct{}{}
+			skylinks = append(skylinks, sl.String())
 		}
 	}
 
-	// turn the skylinks map in an array
-	var skylinks []string
-	for skylink := range skylinksMap {
-		skylinks = append(skylinks, skylink)
+	return dedupe(skylinks)
+}
+
+// dedupe is a helper function that deduplicates the given input slice
+func dedupe(input []string) []string {
+	if len(input) == 0 {
+		return input
 	}
 
-	return skylinks
+	var deduped []string
+	seen := make(map[string]struct{})
+	for _, value := range input {
+		if _, exists := seen[value]; !exists {
+			deduped = append(deduped, value)
+			seen[value] = struct{}{}
+		}
+	}
+	return deduped
 }
 
 // extract tags is a helper function that extracts a set of tags from the given
