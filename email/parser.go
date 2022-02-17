@@ -305,7 +305,7 @@ func dedupe(input []string) []string {
 	}
 
 	var deduped []string
-	seen := make(map[string]struct{}, 0)
+	seen := make(map[string]struct{})
 	for _, value := range input {
 		if _, exists := seen[value]; !exists {
 			deduped = append(deduped, value)
