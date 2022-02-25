@@ -5,9 +5,7 @@ WORKDIR /root
 
 ENV CGO_ENABLED=0
 
-COPY database database
-COPY email email
-COPY go.mod go.sum main.go Makefile ./
+COPY . .
 
 RUN go mod download && make release
 
