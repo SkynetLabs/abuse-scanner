@@ -313,9 +313,14 @@ func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message,
 		return errors.AddContext(err, "could not read msg body")
 	}
 
-	// parse the 'from'
+	// parse the 'from', we evaluate the reply-to first because 'abuse@' emails
+	// are forwarded to our mailbox and the original sender is in the reply-to
+	// field, while the from field holds 'abuse@', so we lose the original
+	// context
 	from := "unknown"
-	if len(msg.Envelope.From) > 0 {
+	if len(msg.Envelope.ReplyTo) > 0 {
+		from = msg.Envelope.ReplyTo[0].Address()
+	} else if len(msg.Envelope.From) > 0 {
 		from = msg.Envelope.From[0].Address()
 	}
 
