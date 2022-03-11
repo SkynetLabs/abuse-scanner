@@ -16,6 +16,15 @@ import (
 // TODO: needs to be extended to cover all methods
 
 const (
+	// mongoTestUsername is the username for the test database
+	mongoTestUsername = "admin"
+
+	// mongoTestPassword is the password for the test database
+	mongoTestPassword = "aO4tV5tC1oU3oQ7u"
+
+	// mongoTestConnString is the connection string for the test database
+	mongoTestConnString = "mongodb://localhost:37017"
+
 	// portalHostName is a dummy hostname
 	portalHostName = "dev.siasky.net"
 )
@@ -121,9 +130,9 @@ func newTestAbuseScannerDB(dbName string) (*AbuseScannerDB, error) {
 
 	// create database
 	dbName = strings.Replace(dbName, "/", "_", -1)
-	db, err := NewAbuseScannerDB(context.Background(), portalHostName, MongoTestConnString, dbName, options.Credential{
-		Username: MongoTestUsername,
-		Password: MongoTestPassword,
+	db, err := NewAbuseScannerDB(context.Background(), portalHostName, mongoTestConnString, dbName, options.Credential{
+		Username: mongoTestUsername,
+		Password: mongoTestPassword,
 	}, logger)
 	if err != nil {
 		return nil, err
