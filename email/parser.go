@@ -323,6 +323,7 @@ func extractTags(input []byte) []string {
 	copyright := regexp.MustCompile(`[Ii]nfringing`).Find(input) != nil
 	copyright = copyright || regexp.MustCompile(`[Cc]opyright`).Find(input) != nil
 	terrorism := regexp.MustCompile(`[Tt]error`).Find(input) != nil
+	terrorism = terrorism || regexp.MustCompile(`[Ii]slamic [Ss]tate`).Find(input) != nil
 	csam := regexp.MustCompile(`[Cc]hild`).Find(input) != nil
 	csam = csam || regexp.MustCompile(`CSAM`).Find(input) != nil
 	csam = csam || regexp.MustCompile(`csam`).Find(input) != nil
