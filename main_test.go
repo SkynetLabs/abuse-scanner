@@ -12,8 +12,6 @@ import (
 // TestLoadDBCredentials is a unit test that covers the loadDBCredentials
 // helper.
 func TestLoadDBCredentials(t *testing.T) {
-	t.Parallel()
-
 	variables := []string{
 		"SKYNET_DB_USER",
 		"SKYNET_DB_PASS",
@@ -72,8 +70,6 @@ func TestLoadDBCredentials(t *testing.T) {
 // TestLoadEmailCredentials is a unit test that covers the loadEmailCredentials
 // helper.
 func TestLoadEmailCredentials(t *testing.T) {
-	t.Parallel()
-
 	variables := []string{
 		"EMAIL_SERVER",
 		"EMAIL_USERNAME",
@@ -127,8 +123,6 @@ func TestLoadEmailCredentials(t *testing.T) {
 
 // TestRestoreEnv is small unit test that covers the restoreEnv helper
 func TestRestoreEnv(t *testing.T) {
-	t.Parallel()
-
 	// assert it can handle nil
 	restoreFn := restoreEnv(nil)
 	err := restoreFn()
