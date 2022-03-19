@@ -40,6 +40,18 @@ func main() {
 	abuseMailbox = strings.Trim(abuseMailbox, "\"")
 	abuseSponsor = strings.Trim(abuseSponsor, "\"")
 
+	// load email credentials
+	emailCredentials, err := loadEmailCredentials()
+	if err != nil {
+		log.Fatal("Failed to load email credentials", err)
+	}
+
+	// load NCMEC credentials
+	ncmecCredentials, err := email.LoadNCMECCredentials()
+	if err != nil {
+		log.Fatal("Failed to load NCMEC credentials", err)
+	}
+
 	// initialize a logger
 	logger := logrus.New()
 
@@ -66,12 +78,6 @@ func main() {
 	db, err := database.NewAbuseScannerDB(ctx, serverDomain, mongoUri, database.DBAbuseScanner, mongoCreds, logger)
 	if err != nil {
 		log.Fatalf("Failed to initialize database client, err: %v", err)
-	}
-
-	// load email credentials
-	emailCredentials, err := loadEmailCredentials()
-	if err != nil {
-		log.Fatal("Failed to load email credentials", err)
 	}
 
 	// create a new mail fetcher, it downloads the emails
@@ -112,6 +118,15 @@ func main() {
 		log.Fatal("Failed to start the email finalizer, err: ", err)
 	}
 
+	// create a new reporter, it will scan for emails that contain CSAM and
+	// report those instances to NCMEC.
+	logger.Info("Initializing reporter...")
+	reporter := email.NewReporter(db, ncmecCredentials, logger)
+	err = reporter.Start()
+	if err != nil {
+		log.Fatal("Failed to start the NCMEC reporter, err: ", err)
+	}
+
 	// catch exit signals
 	exitSignal := make(chan os.Signal, 1)
 	signal.Notify(exitSignal, syscall.SIGINT, syscall.SIGTERM)
@@ -125,6 +140,7 @@ func main() {
 		parser.Stop(),
 		blocker.Stop(),
 		finalizer.Stop(),
+		reporter.Stop(),
 	)
 	if err != nil {
 		log.Fatal("Failed to cleanly close all components, err: ", err)

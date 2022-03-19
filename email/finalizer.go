@@ -185,7 +185,7 @@ func (f *Finalizer) finalizeMessages() {
 
 	logger.Infof("Found %v unfinalized messages", numUnfinalized)
 
-	// loop all emails and parse them
+	// loop all emails and finalize them
 	for _, email := range toFinalize {
 		err := f.finalizeEmail(client, email)
 		if err != nil {

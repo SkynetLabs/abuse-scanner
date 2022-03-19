@@ -94,6 +94,15 @@ type (
 		// fields set by finalizer
 		Finalized   bool      `bson:"finalized"`
 		FinalizedAt time.Time `bson:"finalized_at"`
+
+		// fields set by reporter
+		Reported   bool      `bson:"reported"`
+		ReportedAt time.Time `bson:"reported_at"`
+
+		// NCMEC report specific fields
+		NCMECReportId   uint64    `bson:"ncmec_report_id"`
+		NCMECReportErr  error     `bson:"ncmec_report_err"`
+		NCMECReportedAt time.Time `bson:"ncmec_reported_at"`
 	}
 
 	// AbuseReport contains all information about an abuse report.
@@ -162,6 +171,16 @@ func (a AbuseEmail) String() string {
 	}
 
 	return sb.String()
+}
+
+// HasTag returns true if the abuse report contains the given tag.
+func (ar AbuseReport) HasTag(tag string) bool {
+	for _, arTag := range ar.Tags {
+		if tag == arTag {
+			return true
+		}
+	}
+	return false
 }
 
 // NewAbuseScannerDB returns an instance of the Mongo DB.
@@ -287,9 +306,23 @@ func (db *AbuseScannerDB) FindUnblocked() ([]AbuseEmail, error) {
 // FindUnfinalized returns the messages that have not been finalized.
 func (db *AbuseScannerDB) FindUnfinalized() ([]AbuseEmail, error) {
 	emails, err := db.findGeneric(bson.M{
-		"parsed":    true,
-		"blocked":   true,
-		"finalized": false,
+		"$and": []bson.M{
+			{
+				"parsed":  true,
+				"blocked": true,
+			},
+			{"$or": []bson.M{
+				{
+					"parseResult.tags": bson.M{"$nin": "csam"},
+					"finalized":        false,
+				},
+				{
+					"parseResult.tags": "csam",
+					"reported":         true,
+					"finalized":        false,
+				},
+			}},
+		},
 	})
 	if err != nil {
 		return nil, errors.AddContext(err, "failed to find unfinalized emails")
@@ -306,6 +339,21 @@ func (db *AbuseScannerDB) FindUnparsed() ([]AbuseEmail, error) {
 	})
 	if err != nil {
 		return nil, errors.AddContext(err, "failed to find unparsed emails")
+	}
+	return emails, nil
+}
+
+// FindUnreported returns the messages that have the 'csam' tag but have not
+// been reported to NCMEC.
+func (db *AbuseScannerDB) FindUnreported() ([]AbuseEmail, error) {
+	emails, err := db.findGeneric(bson.M{
+		"parsed":           true,
+		"blocked":          true,
+		"reported":         false,
+		"parse_result.tags": "csam",
+	})
+	if err != nil {
+		return nil, errors.AddContext(err, "failed to find unblocked emails")
 	}
 	return emails, nil
 }
