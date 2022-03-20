@@ -154,11 +154,17 @@ func (r *Reporter) reportEmail(email database.AbuseEmail) error {
 	// defer an update to the email with some information about the NCMEC report
 	var reportErr error
 	defer func() {
+		var reportErrStr string
+		if reportErr != nil {
+			reportErrStr = reportErr.Error()
+		}
 		if err := r.staticDatabase.UpdateNoLock(email, bson.D{
 			{"$set", bson.D{
+				{"reported", reportErr == nil},
+				{"reported_at", reportedAt},
+
 				{"ncmec_report_id", reportId},
-				{"ncmec_report_err", reportErr},
-				{"ncmec_reported_at", reportedAt},
+				{"ncmec_report_err", reportErrStr},
 			}},
 		}); err != nil {
 			logger.Errorf("failed to update email %v with report id %v, err '%v'", email.MessageID, reportId, err)

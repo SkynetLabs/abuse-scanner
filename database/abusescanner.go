@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"strings"
 	"time"
 
@@ -40,6 +41,15 @@ const (
 
 	// lockTTL is the time-to-live in seconds for a lock
 	lockTTL = 300 // 5 minutes
+
+	// mongoTestUsername is the username used to connect with the test DB.
+	mongoTestUsername = "admin"
+
+	// mongoTestPassword is the password used to connect with the test DB.
+	mongoTestPassword = "aO4tV5tC1oU3oQ7u"
+
+	// mongoTestConnString is the connection string to connect with the test DB.
+	mongoTestConnString = "mongodb://localhost:37017"
 )
 
 var (
@@ -101,7 +111,6 @@ type (
 
 		// NCMEC report specific fields
 		NCMECReportId   uint64    `bson:"ncmec_report_id"`
-		NCMECReportErr  error     `bson:"ncmec_report_err"`
 		NCMECReportedAt time.Time `bson:"ncmec_reported_at"`
 	}
 
@@ -252,6 +261,10 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri, mongoDbNam
 				Keys:    bson.D{{"finalized", 1}},
 				Options: options.Index(),
 			},
+			{
+				Keys:    bson.D{{"reported", 1}},
+				Options: options.Index(),
+			},
 		},
 	})
 	if err != nil {
@@ -259,6 +272,21 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri, mongoDbNam
 	}
 
 	return db, nil
+}
+
+// NewTestDatabase returns a new test database.
+func NewTestDatabase(ctx context.Context, dbName string, logger *logrus.Logger) (*AbuseScannerDB, error) {
+	// create a nil logger if none is passed
+	if logger == nil {
+		logger = logrus.New()
+		logger.Out = ioutil.Discard
+	}
+
+	dbName = strings.Replace(dbName, "/", "_", -1)
+	return NewAbuseScannerDB(ctx, "", mongoTestConnString, dbName, options.Credential{
+		Username: mongoTestUsername,
+		Password: mongoTestPassword,
+	}, logger)
 }
 
 // Close will disconnect from the database
@@ -311,15 +339,18 @@ func (db *AbuseScannerDB) FindUnfinalized() ([]AbuseEmail, error) {
 				"parsed":  true,
 				"blocked": true,
 			},
+			// unfinalized emails are either:
+			// - emails without csam that have not been finalized
+			// - emails with csm that have been reported but not yet finalized
 			{"$or": []bson.M{
 				{
-					"parseResult.tags": bson.M{"$nin": "csam"},
-					"finalized":        false,
+					"parse_result.tags": bson.M{"$nin": []string{"csam"}},
+					"finalized":         false,
 				},
 				{
-					"parseResult.tags": "csam",
-					"reported":         true,
-					"finalized":        false,
+					"parse_result.tags": "csam",
+					"reported":          true,
+					"finalized":         false,
 				},
 			}},
 		},
@@ -347,9 +378,10 @@ func (db *AbuseScannerDB) FindUnparsed() ([]AbuseEmail, error) {
 // been reported to NCMEC.
 func (db *AbuseScannerDB) FindUnreported() ([]AbuseEmail, error) {
 	emails, err := db.findGeneric(bson.M{
-		"parsed":           true,
-		"blocked":          true,
-		"reported":         false,
+		"parsed":            true,
+		"blocked":           true,
+		"reported":          false,
+		"finalized":         false,
 		"parse_result.tags": "csam",
 	})
 	if err != nil {
