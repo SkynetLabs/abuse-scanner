@@ -11,6 +11,11 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+const (
+	// portalHostName is a dummy hostname
+	portalHostName = "dev.siasky.net"
+)
+
 var (
 	// emailUID ensures the email UID is unique
 	emailUID = 0
@@ -18,8 +23,7 @@ var (
 	emailUIDMu sync.Mutex
 )
 
-// TestAbuseScannerDB contains a set of unit tests that cover the functionality
-// of the AbuseScannerDB.
+// TestAbuseScannerDB is the test suite that covers the AbuseScannerDB
 func TestAbuseScannerDB(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
@@ -98,8 +102,21 @@ func testFindUnfinalized(ctx context.Context, t *testing.T, db *AbuseScannerDB) 
 		t.Fatal(err)
 	}
 
+	// assertCount is a helper that checks whether the amount of unfinalized
+	// emails for given inbox equals the given count
+	assertCount := func(count int, mailbox string) error {
+		entities, err := db.FindUnfinalized(mailbox)
+		if err != nil {
+			return err
+		}
+		if len(entities) != count {
+			return fmt.Errorf("unexpected number of emails, %v != %v", len(entities), count)
+		}
+		return nil
+	}
+
 	// assert the database contains 0 unfinalized emails
-	if err := assertCount(db.FindUnfinalized, 0); err != nil {
+	if err := assertCount(0, "INBOX"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,7 +133,7 @@ func testFindUnfinalized(ctx context.Context, t *testing.T, db *AbuseScannerDB) 
 
 	// assert we can find it
 	firstUID := email.UID
-	if err := assertCount(db.FindUnfinalized, 1); err != nil {
+	if err := assertCount(1, "INBOX"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,7 +150,7 @@ func testFindUnfinalized(ctx context.Context, t *testing.T, db *AbuseScannerDB) 
 	}
 
 	// assert there's still only one
-	if err := assertCount(db.FindUnfinalized, 1); err != nil {
+	if err := assertCount(1, "INBOX"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -146,7 +163,7 @@ func testFindUnfinalized(ctx context.Context, t *testing.T, db *AbuseScannerDB) 
 	})
 
 	// assert we can now find two
-	if err := assertCount(db.FindUnfinalized, 2); err != nil {
+	if err := assertCount(2, "INBOX"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,7 +176,12 @@ func testFindUnfinalized(ctx context.Context, t *testing.T, db *AbuseScannerDB) 
 	})
 
 	// assert there's a single unfinalized email now
-	if err := assertCount(db.FindUnfinalized, 1); err != nil {
+	if err := assertCount(1, "INBOX"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's no unfinalized emails for unknown inboxes
+	if err := assertCount(0, "UNKNOWN"); err != nil {
 		t.Fatal(err)
 	}
 }

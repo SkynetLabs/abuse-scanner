@@ -33,12 +33,13 @@ type (
 		staticEmailCredentials Credentials
 		staticLogger           *logrus.Entry
 		staticMailbox          string
+		staticServerDomain     string
 		staticWaitGroup        sync.WaitGroup
 	}
 )
 
 // NewFinalizer creates a new finalizer.
-func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, emailAddress, mailbox string, logger *logrus.Logger) *Finalizer {
+func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailCredentials Credentials, emailAddress, mailbox, serverDomain string, logger *logrus.Logger) *Finalizer {
 	return &Finalizer{
 		staticContext:          ctx,
 		staticDatabase:         database,
@@ -132,6 +133,7 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 	err = abuseDB.UpdateNoLock(email, bson.D{
 		{"$set", bson.D{
 			{"finalized", true},
+			{"finalized_by", f.staticServerDomain},
 			{"finalized_at", time.Now().UTC()},
 		}},
 	})
@@ -150,6 +152,7 @@ func (f *Finalizer) finalizeMessages() {
 	// convenience variables
 	abuseDB := f.staticDatabase
 	logger := f.staticLogger
+	mailbox := f.staticMailbox
 
 	// create an email client
 	client, err := NewClient(f.staticEmailCredentials)
@@ -170,7 +173,7 @@ func (f *Finalizer) finalizeMessages() {
 	}()
 
 	// fetch all unfinalized emails
-	toFinalize, err := abuseDB.FindUnfinalized()
+	toFinalize, err := abuseDB.FindUnfinalized(mailbox)
 	if err != nil {
 		logger.Errorf("Failed fetching unfinalized emails, error %v", err)
 		return
