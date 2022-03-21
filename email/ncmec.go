@@ -74,7 +74,8 @@ type (
 
 	// ncmecWebPageIncident defines the url at which abusive content was found.
 	ncmecWebPageIncident struct {
-		Url []string `xml:"url"`
+		ThirdPartyHostedContent bool     `xml:"thirdPartyHostedContent,attr"`
+		Url                     []string `xml:"url"`
 	}
 
 	// ncmecReporter wraps the reporter.
@@ -163,6 +164,7 @@ func (c *NCMECClient) openReport(r report) (reportResponse, error) {
 	if err != nil {
 		return reportResponse{}, err
 	}
+
 	xmlBytes := append([]byte{}, []byte(xml.Header)...)
 	xmlBytes = append(xmlBytes, reportBytes...)
 	body := bytes.NewBuffer(xmlBytes)

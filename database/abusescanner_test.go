@@ -12,8 +12,10 @@ import (
 )
 
 var (
+	// emailUID ensures the email UID is unique
+	emailUID = 0
+	// emailUIDMu guards the emailUID so we can run tests in parallel
 	emailUIDMu sync.Mutex
-	emailUID   = 0
 )
 
 // TestAbuseScannerDB contains a set of unit tests that cover the functionality
@@ -298,8 +300,8 @@ func newTestEmail() AbuseEmail {
 
 // assertCount is a helper that takes a function and asserts the amount of abuse
 // emails it returns is equal to the given count.
-func assertCount(find func() ([]AbuseEmail, error), count int) error {
-	entities, err := find()
+func assertCount(findFn func() ([]AbuseEmail, error), count int) error {
+	entities, err := findFn()
 	if err != nil {
 		return err
 	}

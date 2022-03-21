@@ -66,7 +66,7 @@ func (r *Reporter) Stop() error {
 	select {
 	case <-c:
 		return nil
-	case <-time.After(time.Minute):
+	case <-time.After(maxShutdownTimeout):
 		return errors.New("unclean reporter shutdown")
 	}
 }
@@ -200,25 +200,31 @@ func emailToReport(email database.AbuseEmail) (report, error) {
 		return report{}, errors.New("email has to contain csam")
 	}
 
+	// construct the urls
+	urls := make([]string, len(pr.Skylinks))
+	for i, skylink := range pr.Skylinks {
+		urls[i] = fmt.Sprintf("https://siasky.net/%s", skylink)
+	}
+
 	return report{
 		Xsi:                       "http://www.w3.org/2001/XMLSchema-instance",
 		NoNamespaceSchemaLocation: "https://report.cybertip.org/ispws/xsd",
 
 		IncidentSummary: ncmecIncidentSummary{
-			IncidentType:     "Child Pornography (possession and distribution)",
+			IncidentType:     "Child Pornography (possession, manufacture, and distribution)",
 			IncidentDateTime: email.InsertedAt.Format("2006-01-02T15:04:05Z"),
 		},
 		InternetDetails: ncmecInternetDetails{
 			ncmecWebPageIncident{
-				// TODO: fix this should be full url
-				Url: pr.Skylinks,
+				ThirdPartyHostedContent: true,
+				Url:                     urls,
 			},
 		},
 		Reporter: ncmecReporter{
 			ReportingPerson: ncmecReportingPerson{
-				FirstName: pr.Reporter.Name,
-				LastName:  pr.Reporter.Name,
-				Email:     pr.Reporter.Email,
+				FirstName: "Skynet",
+				LastName:  "Team",
+				Email:     "abuse@siasky.net",
 			},
 		},
 	}, nil

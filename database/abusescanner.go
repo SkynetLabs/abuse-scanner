@@ -110,8 +110,8 @@ type (
 		ReportedAt time.Time `bson:"reported_at"`
 
 		// NCMEC report specific fields
-		NCMECReportId   uint64    `bson:"ncmec_report_id"`
-		NCMECReportedAt time.Time `bson:"ncmec_reported_at"`
+		NCMECReportId  uint64 `bson:"ncmec_report_id"`
+		NCMECReportErr string `bson:"ncmec_report_err"`
 	}
 
 	// AbuseReport contains all information about an abuse report.
