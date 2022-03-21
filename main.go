@@ -46,12 +46,6 @@ func main() {
 		log.Fatal("Failed to load email credentials", err)
 	}
 
-	// load NCMEC credentials
-	ncmecCredentials, err := email.LoadNCMECCredentials()
-	if err != nil {
-		log.Fatal("Failed to load NCMEC credentials", err)
-	}
-
 	// initialize a logger
 	logger := logrus.New()
 
@@ -118,13 +112,24 @@ func main() {
 		log.Fatal("Failed to start the email finalizer, err: ", err)
 	}
 
+	// load NCMEC credentials
+	ncmecReportingEnabled := true
+	ncmecCredentials, err := email.LoadNCMECCredentials()
+	if err != nil {
+		log.Print("Failed to load NCMEC credentials", err)
+		ncmecReportingEnabled = false
+	}
+
 	// create a new reporter, it will scan for emails that contain CSAM and
 	// report those instances to NCMEC.
 	logger.Info("Initializing reporter...")
 	reporter := email.NewReporter(db, ncmecCredentials, logger)
-	err = reporter.Start()
-	if err != nil {
-		log.Fatal("Failed to start the NCMEC reporter, err: ", err)
+
+	if ncmecReportingEnabled {
+		err = reporter.Start()
+		if err != nil {
+			log.Fatal("Failed to start the NCMEC reporter, err: ", err)
+		}
 	}
 
 	// catch exit signals
