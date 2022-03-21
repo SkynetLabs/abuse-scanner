@@ -19,14 +19,14 @@ const (
 	// AbuseDefaultTag is the tag used when there are no tags found in the email
 	AbuseDefaultTag = "abusive"
 
-	// responseTemplateLegalNotice is a small notice we append to the response
-	// template that mentions we do not store any content on our servers
-	responseTemplateLegalNotice = `
+	// responseLegalNotice is a small notice we append to the automated response
+	// that mentions we do not store any content on our servers
+	responseLegalNotice = `
 Please note that no content is stored on our servers, but rather on a decentralised network of hosts. 
-Therefor we are not to be held accountible for any potential abusive content they might contain.
+Therefore we are not to be held accountable for any potential abusive content it might contain.
 We will however do everything in our power to block access from said content when it gets reported.
 		
-Thank you for your reporting.
+Thank you for your report.
 `
 )
 
@@ -91,7 +91,7 @@ func (a AbuseEmail) String() string {
 	sb.WriteString("\nSummary:\n")
 	if len(blocked) == 0 && len(unblocked) == 0 {
 		sb.WriteString("FAILURE - no skylinks found.\n")
-	} else if len(unblocked) == 0 {
+	} else if len(unblocked) != 0 {
 		sb.WriteString("FAILURE - not all skylinks blocked.\n")
 	} else {
 		sb.WriteString("SUCCESS - all skylinks blocked.\n")
@@ -108,13 +108,13 @@ func (a AbuseEmail) String() string {
 
 	// write response template
 	sb.WriteString("\nResponse Template:\n\n")
-	sb.WriteString(a.responseTemplate())
+	sb.WriteString(a.response())
 	return sb.String()
 }
 
-// responseTemplate is a small helper method that returns a response template
-// for this abuse email
-func (a AbuseEmail) responseTemplate() string {
+// response is a small helper method that returns an automated response for this
+// abuse email
+func (a AbuseEmail) response() string {
 	// sanity check
 	if !a.Parsed || !a.Blocked {
 		build.Critical("result should only be called when the email has been parsed and blocked")
@@ -133,7 +133,7 @@ we have processed your report but were unable to find any valid links.
 Please verify the link is not corrupted as we need it in order to prevent access to it from our portals.
 
 %s
-`, responseTemplateLegalNotice)
+`, responseLegalNotice)
 	}
 
 	// build the response template
@@ -154,7 +154,7 @@ Please verify the link is not corrupted as we need it in order to prevent access
 		}
 	}
 
-	sb.WriteString(responseTemplateLegalNotice)
+	sb.WriteString(responseLegalNotice)
 	return sb.String()
 }
 

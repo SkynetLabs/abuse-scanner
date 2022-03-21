@@ -15,8 +15,12 @@ func TestAbuseEmail(t *testing.T) {
 		test func(t *testing.T)
 	}{
 		{
-			name: "ResponseTemplate",
-			test: testResponseTemplate,
+			name: "String",
+			test: testString,
+		},
+		{
+			name: "Template",
+			test: testTemplate,
 		},
 	}
 	for _, test := range tests {
@@ -24,10 +28,63 @@ func TestAbuseEmail(t *testing.T) {
 	}
 }
 
-// testResponseTemplate verifies the implementation of the response template
-// method on the abuse email
-func testResponseTemplate(t *testing.T) {
-	// draft a dummy abuse email with all required fields set
+// testString is a small unit test that verifies the implementation of the
+// String method on the abuse email.
+func testString(t *testing.T) {
+	// draft a dummy abuse email
+	email := AbuseEmail{
+		InsertedBy: "some-server.skynetlabs.com",
+		InsertedAt: time.Now(),
+
+		Blocked:   true,
+		BlockedAt: time.Now(),
+
+		Parsed:   true,
+		ParsedAt: time.Now(),
+
+		ParseResult: AbuseReport{
+			Reporter: AbuseReporter{
+				Name:  "Skynetlabs Dev Team",
+				Email: "devs@skynetlabs.com",
+			},
+			Skylinks: nil,
+			Sponsor:  "skynetlabs.com",
+			Tags:     []string{"csam"},
+		},
+		BlockResult: nil,
+	}
+
+	// small helper function that checks whether the given string is part of the
+	// abuse email's string representation
+	hasString := func(s string) bool {
+		return strings.Contains(email.String(), s)
+	}
+
+	// check output of the summary
+	if !hasString("FAILURE - no skylinks found") {
+		t.Fatal("unexpected", email.String())
+	}
+	email.ParseResult.Skylinks = []string{
+		"BBB6rPvqSR8Mcp0ulwFvFHSYvCZsnsizCvDPxac8HiThjQ",
+		"EAC6rPvqSR8Mcp0ulwFvFHSYvCZsnsizCvDPxac8HiThjQ",
+	}
+	email.BlockResult = []string{
+		AbuseStatusBlocked,
+		AbuseStatusNotBlocked,
+	}
+	if !hasString("FAILURE - not all skylinks blocked") {
+		t.Fatal("unexpected", email.String())
+	}
+	email.BlockResult[1] = AbuseStatusBlocked
+	if !hasString("SUCCESS - all skylinks blocked") {
+		t.Fatal("unexpected", email.String())
+	}
+}
+
+// testTemplate verifies the implementation of the response template method on
+// the abuse email
+func testTemplate(t *testing.T) {
+	// draft a dummy abuse email
 	email := AbuseEmail{
 		InsertedBy: "some-server.skynetlabs.com",
 		InsertedAt: time.Now(),
@@ -52,7 +109,7 @@ func testResponseTemplate(t *testing.T) {
 	// small helper function that checks whether the given string is part of the
 	// abuse email's response template
 	hasString := func(s string) bool {
-		return strings.Contains(email.responseTemplate(), s)
+		return strings.Contains(email.response(), s)
 	}
 
 	// check whether it returns the appropriate template
