@@ -25,7 +25,7 @@ const (
 Please note that no content is stored on our servers, but rather on a decentralised network of hosts. 
 Therefore we are not to be held accountable for any potential abusive content it might contain.
 We will, however, do everything in our power to block access from said content when it gets reported.
-		
+
 Thank you for your report.
 `
 )
@@ -131,7 +131,6 @@ Hello,
 
 we have processed your report but were unable to find any valid links.
 Please verify the link is not corrupted as we need it in order to prevent access to it from our portals.
-
 %s
 `, responseLegalNotice)
 	}
@@ -141,14 +140,14 @@ Please verify the link is not corrupted as we need it in order to prevent access
 	sb.WriteString("Hello,\n\n")
 
 	if len(blocked) > 0 {
-		sb.WriteString(fmt.Sprintf("the following links were identified and blocked on all of our servers as of %v\n", a.BlockedAt.Format("Mon Jan _2 15:04:05 2006")))
+		sb.WriteString(fmt.Sprintf("the following links were identified and blocked on all of our servers as of %v\n\n", a.BlockedAt.Format("Mon Jan _2 15:04:05 2006")))
 		for _, skylink := range blocked {
 			sb.WriteString(fmt.Sprintf("- %s\n", skylink))
 		}
 	}
 
 	if len(unblocked) > 0 {
-		sb.WriteString("\nthe following links could not be blocked:\n")
+		sb.WriteString("\nthe following links could not be blocked:\n\n")
 		for _, skylink := range unblocked {
 			sb.WriteString(fmt.Sprintf("- %s\n", skylink))
 		}
