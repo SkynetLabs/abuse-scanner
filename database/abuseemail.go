@@ -24,7 +24,7 @@ const (
 	responseLegalNotice = `
 Please note that no content is stored on our servers, but rather on a decentralised network of hosts. 
 Therefore we are not to be held accountable for any potential abusive content it might contain.
-We will however do everything in our power to block access from said content when it gets reported.
+We will, however, do everything in our power to block access from said content when it gets reported.
 		
 Thank you for your report.
 `
