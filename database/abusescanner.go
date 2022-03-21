@@ -150,6 +150,13 @@ func (a AbuseEmail) String() string {
 	sb.WriteString(fmt.Sprintf("Name: %v\n", pr.Reporter.Name))
 	sb.WriteString(fmt.Sprintf("Email: %v\n", pr.Reporter.Email))
 
+	// if the abuse email has CSAM we report on the NCMEC reporting
+	if a.ParseResult.HasTag("csam") {
+		sb.WriteString("\nNCMEC Report:\n")
+		sb.WriteString(fmt.Sprintf("Report ID: %v\n", a.NCMECReportId))
+		sb.WriteString(fmt.Sprintf("Report Error: %v\n", a.NCMECReportErr))
+	}
+
 	sb.WriteString("\nTags:\n")
 	for _, tag := range pr.Tags {
 		sb.WriteString(tag + "\n")

@@ -273,6 +273,23 @@ func testFindUnreported(ctx context.Context, t *testing.T, db *AbuseScannerDB) {
 	}
 }
 
+// TestHasTag is a simple unit test that covers the functionality of the HasTag
+// method
+func TestHasTag(t *testing.T) {
+	t.Parallel()
+
+	report := AbuseReport{Tags: []string{"foo", "bar"}}
+	if !report.HasTag("foo") {
+		t.Fatal("unexpected")
+	}
+	if !report.HasTag("bar") {
+		t.Fatal("unexpected")
+	}
+	if report.HasTag("baz") {
+		t.Fatal("unexpected")
+	}
+}
+
 // newTestEmail returns a test email object
 func newTestEmail() AbuseEmail {
 	emailUIDMu.Lock()
