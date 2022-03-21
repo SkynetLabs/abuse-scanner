@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	lock "github.com/square/mongo-lock"
 	"gitlab.com/NebulousLabs/errors"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -183,8 +185,11 @@ func (db *AbuseScannerDB) FindUnblocked() ([]AbuseEmail, error) {
 }
 
 // FindUnfinalized returns the messages that have not been finalized.
-func (db *AbuseScannerDB) FindUnfinalized() ([]AbuseEmail, error) {
+func (db *AbuseScannerDB) FindUnfinalized(mailbox string) ([]AbuseEmail, error) {
 	emails, err := db.findGeneric(bson.M{
+		"email_uid": bson.M{"$regex": primitive.Regex{
+			Pattern: fmt.Sprintf("^%v-", mailbox),
+		}},
 		"parsed":    true,
 		"blocked":   true,
 		"finalized": false,

@@ -48,18 +48,21 @@ type (
 		Skip bool `bson:"skip"`
 
 		// fields set by parser
-		ParsedAt    time.Time   `bson:"parsed_at"`
-		ParseResult AbuseReport `bson:"parse_result"`
 		Parsed      bool        `bson:"parsed"`
+		ParsedAt    time.Time   `bson:"parsed_at"`
+		ParsedBy    string      `bson:"parsed_by"`
+		ParseResult AbuseReport `bson:"parse_result"`
 
 		// fields set by blocker
-		BlockedAt   time.Time `bson:"blocked_at"`
-		BlockResult []string  `bson:"block_result"`
 		Blocked     bool      `bson:"blocked"`
+		BlockedAt   time.Time `bson:"blocked_at"`
+		BlockedBy   string    `bson:"blocked_by"`
+		BlockResult []string  `bson:"block_result"`
 
 		// fields set by finalizer
 		Finalized   bool      `bson:"finalized"`
 		FinalizedAt time.Time `bson:"finalized_at"`
+		FinalizedBy string    `bson:"finalized_by"`
 	}
 
 	// AbuseReport contains all information about an abuse report.

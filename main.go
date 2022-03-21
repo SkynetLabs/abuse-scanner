@@ -85,7 +85,7 @@ func main() {
 	// create a new mail parser, it parses any email that's not parsed yet for
 	// abuse skylinks and a set of abuse tag
 	logger.Info("Initializing email parser...")
-	parser := email.NewParser(ctx, db, abuseSponsor, logger)
+	parser := email.NewParser(ctx, db, serverDomain, abuseSponsor, logger)
 	err = parser.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email parser, err: ", err)
@@ -106,7 +106,7 @@ func main() {
 	// when the abuse scanner has replied with a report of all the skylinks that
 	// have been found and blocked.
 	logger.Info("Initializing finalizer...")
-	finalizer := email.NewFinalizer(ctx, db, emailCredentials, abuseMailaddress, abuseMailbox, logger)
+	finalizer := email.NewFinalizer(ctx, db, emailCredentials, abuseMailaddress, abuseMailbox, serverDomain, logger)
 	err = finalizer.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email finalizer, err: ", err)

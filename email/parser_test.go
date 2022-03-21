@@ -240,7 +240,8 @@ func testBuildAbuseReport(t *testing.T) {
 	}
 
 	// create a parser
-	parser := NewParser(ctx, db, "somesponsor", logger)
+	domain := "dev.siasky.net"
+	parser := NewParser(ctx, db, domain, "somesponsor", logger)
 
 	// create an abuse email
 	email := database.AbuseEmail{
@@ -256,7 +257,7 @@ func testBuildAbuseReport(t *testing.T) {
 		Blocked:   false,
 		Finalized: false,
 
-		InsertedBy: "dev.siasky.net",
+		InsertedBy: domain,
 		InsertedAt: time.Now().UTC(),
 	}
 

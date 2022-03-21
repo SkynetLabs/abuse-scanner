@@ -36,21 +36,23 @@ type (
 	// Parser is an object that will periodically scan for unparsed emails and
 	// parse them for skylinks.
 	Parser struct {
-		staticContext   context.Context
-		staticDatabase  *database.AbuseScannerDB
-		staticLogger    *logrus.Entry
-		staticSponsor   string
-		staticWaitGroup sync.WaitGroup
+		staticContext      context.Context
+		staticDatabase     *database.AbuseScannerDB
+		staticLogger       *logrus.Entry
+		staticServerDomain string
+		staticSponsor      string
+		staticWaitGroup    sync.WaitGroup
 	}
 )
 
 // NewParser creates a new parser.
-func NewParser(ctx context.Context, database *database.AbuseScannerDB, sponsor string, logger *logrus.Logger) *Parser {
+func NewParser(ctx context.Context, database *database.AbuseScannerDB, serverDomain, sponsor string, logger *logrus.Logger) *Parser {
 	return &Parser{
-		staticContext:  ctx,
-		staticDatabase: database,
-		staticLogger:   logger.WithField("module", "Parser"),
-		staticSponsor:  sponsor,
+		staticContext:      ctx,
+		staticDatabase:     database,
+		staticLogger:       logger.WithField("module", "Parser"),
+		staticServerDomain: serverDomain,
+		staticSponsor:      sponsor,
 	}
 }
 
@@ -198,6 +200,7 @@ func (p *Parser) parseEmail(email database.AbuseEmail) (err error) {
 			{"$set", bson.D{
 				{"parsed", true},
 				{"parsed_at", time.Now().UTC()},
+				{"parsed_by", p.staticServerDomain},
 				{"parse_result", report},
 			}},
 		},
