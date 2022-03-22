@@ -200,6 +200,20 @@ func testExtractTags(t *testing.T) {
 	if tags[0] != "copyright" || tags[1] != "csam" || tags[2] != "malware" || tags[3] != "phishing" || tags[4] != "terrorism" {
 		t.Fatal("unexpected tags", tags)
 	}
+
+	// check whether islamic state is tagged as terrost content
+	exampleBody = []byte(`
+	This is an example of an email body that might contain links to islamic state propaganda.
+	`)
+
+	// extract the tags and assert we found all of them
+	tags = extractTags(exampleBody)
+	if len(tags) != 1 {
+		t.Fatalf("unexpected amount of tags found, %v != 1", len(tags))
+	}
+	if tags[0] != "terrorism" {
+		t.Fatal("unexpected tag", tags[0])
+	}
 }
 
 // testBuildAbuseReport is a unit test that verifies the functionality of the
