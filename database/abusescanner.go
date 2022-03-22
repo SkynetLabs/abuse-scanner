@@ -16,15 +16,6 @@ import (
 )
 
 const (
-	// AbuseStatusBlocked denotes the blocked status.
-	AbuseStatusBlocked = "BLOCKED"
-
-	// AbuseStatusNotBlocked denotes the not blocked status.
-	AbuseStatusNotBlocked = "NOT BLOCKED"
-
-	// AbuseDefaultTag is the tag used when there are no tags found in the email
-	AbuseDefaultTag = "abusive"
-
 	// DBAbuseScanner defines the name of the mongo database used by the scanner
 	DBAbuseScanner = "abuse-scanner"
 
@@ -65,55 +56,6 @@ type (
 		staticPortalHostName string
 	}
 
-	// AbuseEmail represent an object in the emails collection.
-	AbuseEmail struct {
-		// fields set by fetcher
-		ID        primitive.ObjectID `bson:"_id"`
-		UID       string             `bson:"email_uid"`
-		UIDRaw    uint32             `bson:"email_uid_raw"`
-		Body      []byte             `bson:"email_body"`
-		From      string             `bson:"email_from"`
-		Subject   string             `bson:"email_subject"`
-		MessageID string             `bson:"email_message_id"`
-
-		InsertedBy string    `bson:"inserted_by"`
-		InsertedAt time.Time `bson:"inserted_at"`
-
-		Skip bool `bson:"skip"`
-
-		// fields set by parser
-		Parsed      bool        `bson:"parsed"`
-		ParsedAt    time.Time   `bson:"parsed_at"`
-		ParsedBy    string      `bson:"parsed_by"`
-		ParseResult AbuseReport `bson:"parse_result"`
-
-		// fields set by blocker
-		Blocked     bool      `bson:"blocked"`
-		BlockedAt   time.Time `bson:"blocked_at"`
-		BlockedBy   string    `bson:"blocked_by"`
-		BlockResult []string  `bson:"block_result"`
-
-		// fields set by finalizer
-		Finalized   bool      `bson:"finalized"`
-		FinalizedAt time.Time `bson:"finalized_at"`
-		FinalizedBy string    `bson:"finalized_by"`
-	}
-
-	// AbuseReport contains all information about an abuse report.
-	AbuseReport struct {
-		Skylinks []string      `bson:"skylinks"`
-		Reporter AbuseReporter `bson:"reporter"`
-		Sponsor  string        `bson:"sponsor"`
-		Tags     []string      `bson:"tags"`
-	}
-
-	// AbuseReporter encapsulates some information about the reporter.
-	AbuseReporter struct {
-		Name         string `bson:"name"`
-		Email        string `bson:"email"`
-		OtherContact string `bson:"other_contact"`
-	}
-
 	// abuseEmailLock represents a lock on an abuse email.
 	abuseEmailLock struct {
 		staticClient         *lock.Client
@@ -121,51 +63,6 @@ type (
 		staticPortalHostname string
 	}
 )
-
-// String returns a string representation of the abuse email
-func (a AbuseEmail) String() string {
-	var sb strings.Builder
-	pr := a.ParseResult
-	sb.WriteString("\nAbuse Scanner Report:\n")
-
-	sb.WriteString("\nServer:\n")
-	sb.WriteString(fmt.Sprintf("Domain: %v\n", a.InsertedBy))
-
-	sb.WriteString("\nReporter:\n")
-	sb.WriteString(fmt.Sprintf("Name: %v\n", pr.Reporter.Name))
-	sb.WriteString(fmt.Sprintf("Email: %v\n", pr.Reporter.Email))
-
-	sb.WriteString("\nTags:\n")
-	for _, tag := range pr.Tags {
-		sb.WriteString(tag + "\n")
-	}
-
-	allBlocked := true
-	sb.WriteString("\nSkylinks:\n")
-	for i, skylink := range pr.Skylinks {
-		var parts []string
-		if a.BlockResult[i] == AbuseStatusBlocked {
-			parts = []string{AbuseStatusBlocked, skylink}
-		} else {
-			parts = []string{AbuseStatusNotBlocked, skylink, a.BlockResult[i]}
-			allBlocked = false
-		}
-		sb.WriteString(fmt.Sprintf("%s\n", strings.Join(parts, " | ")))
-	}
-
-	sb.WriteString("\nSummary:\n")
-	if len(pr.Skylinks) == 0 {
-		sb.WriteString("FAILURE - no skylinks found.\n")
-	} else {
-		if allBlocked {
-			sb.WriteString("SUCCESS\n")
-		} else {
-			sb.WriteString("FAILURE - not all skylinks blocked.\n")
-		}
-	}
-
-	return sb.String()
-}
 
 // NewAbuseScannerDB returns an instance of the Mongo DB.
 func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri, mongoDbName string, mongoCreds options.Credential, logger *logrus.Logger) (*AbuseScannerDB, error) {
