@@ -5,6 +5,7 @@ import (
 	"abuse-scanner/email"
 	"fmt"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -29,10 +30,22 @@ func main() {
 	abuseLoglevel := os.Getenv("ABUSE_LOG_LEVEL")
 	abuseMailaddress := os.Getenv("ABUSE_MAILADDRESS")
 	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
+	abusePortalURL := sanitizePortalURL(os.Getenv("ABUSE_PORTAL_URL"))
 	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
 	blockerHost := os.Getenv("BLOCKER_HOST")
 	blockerPort := os.Getenv("BLOCKER_PORT")
 	serverDomain := os.Getenv("SERVER_DOMAIN")
+
+	// parse ncmec reporting enabled variable
+	ncmecReportingEnabled := false
+	ncmecReportingEnabledStr := os.Getenv("ABUSE_NCMEC_REPORTING_ENABLED")
+	if ncmecReportingEnabledStr != "" {
+		var err error
+		ncmecReportingEnabled, err = strconv.ParseBool(ncmecReportingEnabledStr)
+		if err != nil {
+			log.Fatalf("Failed parsing the value for env variable ABUSE_NCMEC_REPORTING_ENABLED '%s' as a boolean, err %v", ncmecReportingEnabledStr, err)
+		}
+	}
 
 	// TODO: validate env variables
 
@@ -112,20 +125,24 @@ func main() {
 		log.Fatal("Failed to start the email finalizer, err: ", err)
 	}
 
-	// load NCMEC credentials
-	ncmecReportingEnabled := true
-	ncmecCredentials, err := email.LoadNCMECCredentials()
-	if err != nil {
-		log.Print("Failed to load NCMEC credentials", err)
-		ncmecReportingEnabled = false
-	}
-
 	// create a new reporter, it will scan for emails that contain CSAM and
 	// report those instances to NCMEC.
-	logger.Info("Initializing reporter...")
-	reporter := email.NewReporter(db, ncmecCredentials, logger)
-
+	var reporter *email.Reporter
 	if ncmecReportingEnabled {
+		// load NCMEC credentials
+		ncmecCredentials, err := email.LoadNCMECCredentials()
+		if err != nil {
+			log.Fatal("Failed to load NCMEC credentials", err)
+		}
+
+		// load NCMEC reporter
+		ncmecReporter, err := email.LoadNCMECReporter()
+		if err != nil {
+			log.Fatal("Failed to load NCMEC reporter", err)
+		}
+
+		logger.Info("Initializing reporter...")
+		reporter := email.NewReporter(db, ncmecCredentials, abusePortalURL, ncmecReporter, logger)
 		err = reporter.Start()
 		if err != nil {
 			log.Fatal("Failed to start the NCMEC reporter, err: ", err)
@@ -145,8 +162,13 @@ func main() {
 		parser.Stop(),
 		blocker.Stop(),
 		finalizer.Stop(),
-		reporter.Stop(),
 	)
+	if reporter != nil {
+		err = errors.Compose(
+			err,
+			reporter.Stop(),
+		)
+	}
 	if err != nil {
 		log.Fatal("Failed to cleanly close all components, err: ", err)
 	}
@@ -192,4 +214,19 @@ func loadEmailCredentials() (email.Credentials, error) {
 		return email.Credentials{}, errors.New("missing env var 'EMAIL_PASSWORD'")
 	}
 	return creds, nil
+}
+
+// sanitizePortalURL is a helper function that sanitizes the given input portal
+// URL, stripping away trailing slashes and ensuring it's prefixed with https.
+func sanitizePortalURL(portalURL string) string {
+	portalURL = strings.TrimSpace(portalURL)
+	portalURL = strings.TrimSuffix(portalURL, "/")
+	if strings.HasPrefix(portalURL, "https://") {
+		return portalURL
+	}
+	portalURL = strings.TrimPrefix(portalURL, "http://")
+	if portalURL == "" {
+		return portalURL
+	}
+	return fmt.Sprintf("https://%s", portalURL)
 }

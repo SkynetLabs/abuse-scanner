@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,6 +28,10 @@ func TestReporter(t *testing.T) {
 		test func(t *testing.T)
 	}{
 		{
+			name: "EmailToReport",
+			test: testEmailToReport,
+		},
+		{
 			name: "ReportMessages",
 			test: testReportMessages,
 		},
@@ -40,9 +45,9 @@ func TestReporter(t *testing.T) {
 func testReportMessages(t *testing.T) {
 	t.Parallel()
 
-	// os.Setenv("NCMEC_USERNAME", "[ENTER_USERNAME]")
-	// os.Setenv("NCMEC_PASSWORD", "[ENTER_PASSWORD]")
-	// os.Setenv("NCMEC_DEBUG", "true")
+	os.Setenv("NCMEC_USERNAME", "Siasky")
+	os.Setenv("NCMEC_PASSWORD", "Ug7=Ba3=Qg2@")
+	os.Setenv("NCMEC_DEBUG", "true")
 
 	// load credentials from env
 	creds, err := LoadNCMECCredentials()
@@ -80,7 +85,7 @@ func testReportMessages(t *testing.T) {
 	}
 
 	// create a reporter
-	reporter := NewReporter(db, creds, logger)
+	reporter := NewReporter(db, creds, "https://siasky.net", testReporter(), logger)
 
 	// insert an email to report
 	email := database.AbuseEmail{
@@ -161,9 +166,18 @@ func testReportMessages(t *testing.T) {
 	}
 }
 
-// TestEmailToReport is a unit test that covers the emailToReport helper.
-func TestEmailToReport(t *testing.T) {
+// testEmailToReport is a unit test that covers the emailToReport helper.
+func testEmailToReport(t *testing.T) {
 	t.Parallel()
+
+	// create a discard logger
+	logger := logrus.New()
+	logger.Out = ioutil.Discard
+
+	// create a dummy reporter (doesn't have to hold actual credentials)
+	var creds NCMECCredentials
+	reporter := testReporter()
+	r := NewReporter(nil, creds, "https://siasky.net", reporter, logger)
 
 	// create a dummy email
 	now := time.Now().UTC()
@@ -188,19 +202,19 @@ func TestEmailToReport(t *testing.T) {
 	}
 
 	// generate a report - test error flow
-	actual, err := emailToReport(email)
+	actual, err := r.emailToReport(email)
 	if err == nil || !strings.Contains(err.Error(), "email has to be parsed") {
 		t.Fatal(err)
 	}
 	email.Parsed = true
-	actual, err = emailToReport(email)
+	actual, err = r.emailToReport(email)
 	if err == nil || !strings.Contains(err.Error(), "email has to contain csam") {
 		t.Fatal(err)
 	}
 	email.ParseResult.Tags = []string{"csam"}
 
 	// generate a report
-	actual, err = emailToReport(email)
+	actual, err = r.emailToReport(email)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,17 +238,22 @@ func TestEmailToReport(t *testing.T) {
 				},
 			},
 		},
-		Reporter: ncmecReporter{
-			ReportingPerson: ncmecReportingPerson{
-				FirstName: "Skynet",
-				LastName:  "Team",
-				Email:     "abuse@siasky.net",
-			},
-		},
+		Reporter: reporter,
 	}
 
 	// assert the report looks exactly as we suspect it
 	if !reflect.DeepEqual(expected, actual) {
 		t.Fatal("unexpected report", actual)
+	}
+}
+
+// testReporter returns a reporter object for use in testing.
+func testReporter() NCMECReporter {
+	return NCMECReporter{
+		ReportingPerson: ncmecReportingPerson{
+			FirstName: "SkynetLabs",
+			LastName:  "Inc.",
+			Email:     "abuse@skynetlabs.com",
+		},
 	}
 }

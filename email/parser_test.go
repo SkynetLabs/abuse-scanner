@@ -106,7 +106,6 @@ func testExtractSkylinks(t *testing.T) {
 	// extract skylinks
 	skylinks = extractSkylinks(exampleBody)
 	if len(skylinks) != 4 {
-		t.Log(skylinks)
 		t.Fatalf("unexpected amount of skylinks found, %v != 4", len(skylinks))
 	}
 

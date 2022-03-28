@@ -157,13 +157,28 @@ func (a AbuseEmail) result() ([]string, []string) {
 
 // String returns a string representation of the abuse email
 func (a AbuseEmail) String() string {
-	var sb strings.Builder
+	// convenience variables
 	pr := a.ParseResult
+	blocked, unblocked := a.result()
+
+	var sb strings.Builder
 	sb.WriteString("\nAbuse Scanner Report:\n")
 
-	sb.WriteString("\nServer:\n")
+	// write summary
+	sb.WriteString("\nSummary:\n")
+	if len(blocked) == 0 && len(unblocked) == 0 {
+		sb.WriteString("FAILURE - no skylinks found.\n")
+	} else if len(unblocked) != 0 {
+		sb.WriteString("FAILURE - not all skylinks blocked.\n")
+	} else {
+		sb.WriteString("SUCCESS - all skylinks blocked.\n")
+	}
+
+	// write server info
+	sb.WriteString("\nServer Info:\n")
 	sb.WriteString(fmt.Sprintf("Domain: %v\n", a.InsertedBy))
 
+	// write reporter info
 	sb.WriteString("\nReporter:\n")
 	sb.WriteString(fmt.Sprintf("Name: %v\n", pr.Reporter.Name))
 	sb.WriteString(fmt.Sprintf("Email: %v\n", pr.Reporter.Email))
@@ -175,35 +190,9 @@ func (a AbuseEmail) String() string {
 		sb.WriteString(fmt.Sprintf("Report Error: %v\n", a.NCMECReportErr))
 	}
 
-	sb.WriteString("\nTags:\n")
-	for _, tag := range pr.Tags {
-		sb.WriteString(tag + "\n")
-	}
-
-	allBlocked := true
-	sb.WriteString("\nSkylinks:\n")
-	for i, skylink := range pr.Skylinks {
-		var parts []string
-		if a.BlockResult[i] == AbuseStatusBlocked {
-			parts = []string{AbuseStatusBlocked, skylink}
-		} else {
-			parts = []string{AbuseStatusNotBlocked, skylink, a.BlockResult[i]}
-			allBlocked = false
-		}
-		sb.WriteString(fmt.Sprintf("%s\n", strings.Join(parts, " | ")))
-	}
-
-	sb.WriteString("\nSummary:\n")
-	if len(pr.Skylinks) == 0 {
-		sb.WriteString("FAILURE - no skylinks found.\n")
-	} else {
-		if allBlocked {
-			sb.WriteString("SUCCESS\n")
-		} else {
-			sb.WriteString("FAILURE - not all skylinks blocked.\n")
-		}
-	}
-
+	// write response template
+	sb.WriteString("\nResponse Template:\n\n")
+	sb.WriteString(a.response())
 	return sb.String()
 }
 

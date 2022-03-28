@@ -22,6 +22,14 @@ const (
 
 	// ncmecTestBaseURI is the base URI for NCMEC's test API.
 	ncmecTestBaseURI = "https://exttest.cybertip.org/ispws"
+
+	// ncmecStatusOK is the custom status code ncmec uses on their endpoints
+	// when everything is ok.
+	ncmecStatusOK = 0
+
+	// ncmecStatusValidationFailed is the custom status code ncmec uses on
+	// their endpoints when validation fails.
+	ncmecStatusValidationFailed = 4100
 )
 
 type (
@@ -31,7 +39,16 @@ type (
 	NCMECCredentials struct {
 		Username string
 		Password string
-		Debug    bool
+
+		// Debug indicates whether the reports are sent to NCMEC's test - or
+		// production API.
+		Debug bool
+	}
+
+	// NCMECReporter holds information about the reporter. This information is
+	// loaded from the environment as it has to be configurable.
+	NCMECReporter struct {
+		ReportingPerson ncmecReportingPerson `xml:"reportingPerson"`
 	}
 
 	// report is the xml that is expected from NCMEC to report an incident
@@ -41,7 +58,7 @@ type (
 
 		IncidentSummary ncmecIncidentSummary `xml:"incidentSummary"`
 		InternetDetails ncmecInternetDetails `xml:"internetDetails"`
-		Reporter        ncmecReporter        `xml:"reporter"`
+		Reporter        NCMECReporter        `xml:"reporter"`
 	}
 
 	// reportResponse is the xml response that gets returned when a report
@@ -76,11 +93,6 @@ type (
 	ncmecWebPageIncident struct {
 		ThirdPartyHostedContent bool     `xml:"thirdPartyHostedContent,attr"`
 		Url                     []string `xml:"url"`
-	}
-
-	// ncmecReporter wraps the reporter.
-	ncmecReporter struct {
-		ReportingPerson ncmecReportingPerson `xml:"reportingPerson"`
 	}
 
 	// ncmecReportingPerson defines the reporter.
@@ -122,6 +134,24 @@ func LoadNCMECCredentials() (NCMECCredentials, error) {
 	}
 
 	return creds, nil
+}
+
+// LoadNCMECReporter is a helper function that loads the NCMEC reporter from the
+// environment.
+func LoadNCMECReporter() (NCMECReporter, error) {
+	var reporter ncmecReportingPerson
+	var ok bool
+	if reporter.FirstName, ok = os.LookupEnv("NCMEC_REPORTER_FIRSTNAME"); !ok {
+		return NCMECReporter{}, errors.New("missing env var NCMEC_REPORTER_FIRSTNAME")
+	}
+	if reporter.LastName, ok = os.LookupEnv("NCMEC_REPORTER_LASTNAME"); !ok {
+		return NCMECReporter{}, errors.New("missing env var NCMEC_REPORTER_LASTNAME")
+	}
+	if reporter.Email, ok = os.LookupEnv("NCMEC_REPORTER_EMAIL"); !ok {
+		return NCMECReporter{}, errors.New("missing env var NCMEC_REPORTER_EMAIL")
+	}
+
+	return NCMECReporter{ReportingPerson: reporter}, nil
 }
 
 // NewNCMECClient returns a new instance of the NCMEC client.
@@ -228,11 +258,7 @@ func (c *NCMECClient) get(endpoint string, query url.Values, headers http.Header
 	}()
 
 	// decode the response body
-	err = xml.NewDecoder(res.Body).Decode(obj)
-	if err != nil {
-		return err
-	}
-	return nil
+	return xml.NewDecoder(res.Body).Decode(obj)
 }
 
 // post is a helper function that executes a POST request on the given endpoint

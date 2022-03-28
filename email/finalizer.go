@@ -124,7 +124,7 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 	reader := strings.NewReader(msg)
 
 	// append an email with the abuse report result
-	err = client.Append(f.staticMailbox, nil, time.Now(), reader)
+	err = client.Append(f.staticMailbox, nil, time.Now().UTC(), reader)
 	if err != nil {
 		return err
 	}

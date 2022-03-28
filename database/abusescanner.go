@@ -128,23 +128,23 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri, mongoDbNam
 	err = db.ensureSchema(ctx, map[string][]mongo.IndexModel{
 		collEmails: {
 			{
-				Keys:    bson.D{{"email_uid", 1}},
+				Keys:    bson.M{"email_uid": 1},
 				Options: options.Index().SetUnique(true),
 			},
 			{
-				Keys:    bson.D{{"parsed", 1}},
+				Keys:    bson.M{"parsed": 1},
 				Options: options.Index(),
 			},
 			{
-				Keys:    bson.D{{"blocked", 1}},
+				Keys:    bson.M{"blocked": 1},
 				Options: options.Index(),
 			},
 			{
-				Keys:    bson.D{{"finalized", 1}},
+				Keys:    bson.M{"finalized": 1},
 				Options: options.Index(),
 			},
 			{
-				Keys:    bson.D{{"reported", 1}},
+				Keys:    bson.M{"reported": 1},
 				Options: options.Index(),
 			},
 		},
@@ -221,8 +221,9 @@ func (db *AbuseScannerDB) FindUnfinalized(mailbox string) ([]AbuseEmail, error) 
 				"email_uid": bson.M{"$regex": primitive.Regex{
 					Pattern: fmt.Sprintf("^%v-", mailbox),
 				}},
-				"parsed":  true,
-				"blocked": true,
+				"parsed":    true,
+				"blocked":   true,
+				"finalized": false,
 			},
 			// unfinalized emails are either:
 			// - emails without csam that have not been finalized
@@ -230,12 +231,10 @@ func (db *AbuseScannerDB) FindUnfinalized(mailbox string) ([]AbuseEmail, error) 
 			{"$or": []bson.M{
 				{
 					"parse_result.tags": bson.M{"$nin": []string{"csam"}},
-					"finalized":         false,
 				},
 				{
 					"parse_result.tags": "csam",
 					"reported":          true,
-					"finalized":         false,
 				},
 			}},
 		},

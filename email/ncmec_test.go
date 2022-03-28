@@ -1,6 +1,7 @@
 package email
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,9 +15,9 @@ func TestNCMECClient(t *testing.T) {
 	}
 	t.Parallel()
 
-	// os.Setenv("NCMEC_USERNAME", "[ENTER_USERNAME]")
-	// os.Setenv("NCMEC_PASSWORD", "[ENTER_PASSWORD]")
-	// os.Setenv("NCMEC_DEBUG", "true")
+	os.Setenv("NCMEC_USERNAME", "Siasky")
+	os.Setenv("NCMEC_PASSWORD", "Ug7=Ba3=Qg2@")
+	os.Setenv("NCMEC_DEBUG", "true")
 
 	// load credentials from env
 	creds, err := LoadNCMECCredentials()
@@ -58,7 +59,7 @@ func TestNCMECClient(t *testing.T) {
 // testFinishReport is a unit test that verifies whether we can finish a report
 func testFinishReport(t *testing.T, c *NCMECClient) {
 	// open a report
-	now := time.Now().Add(-time.Hour)
+	now := time.Now().UTC().Add(-time.Hour)
 	report := newTestReport(now)
 	res, err := c.openReport(report)
 	if err != nil {
@@ -72,8 +73,8 @@ func testFinishReport(t *testing.T, c *NCMECClient) {
 	}
 
 	// assert the report was finished
-	if ress.ResponseCode != 0 {
-		t.Fatalf("unexpected response code, %v != 0", ress.ResponseCode)
+	if ress.ResponseCode != ncmecStatusOK {
+		t.Fatalf("unexpected response code, %v != %v", ress.ResponseCode, ncmecStatusOK)
 	}
 	if ress.ReportId != res.ReportId {
 		t.Fatalf("unexpected report id, %v != %v", ress.ReportId, res.ReportId)
@@ -83,7 +84,7 @@ func testFinishReport(t *testing.T, c *NCMECClient) {
 // testOpenReport is a unit test that verifies we can open a report with NCMEC
 func testOpenReport(t *testing.T, c *NCMECClient) {
 	// open a report
-	now := time.Now().Add(time.Hour)
+	now := time.Now().UTC().Add(time.Hour)
 	report := newTestReport(now)
 	res, err := c.openReport(report)
 	if err != nil {
@@ -92,8 +93,8 @@ func testOpenReport(t *testing.T, c *NCMECClient) {
 
 	// assert the response, we expect it to have failed because the invalid
 	// (future) date
-	if res.ResponseCode != 4100 {
-		t.Fatalf("unexpected response code, %v != 4100", res.ResponseCode)
+	if res.ResponseCode != ncmecStatusValidationFailed {
+		t.Fatalf("unexpected response code, %v != %v", res.ResponseCode, ncmecStatusValidationFailed)
 	}
 	if !strings.Contains(res.ResponseDescription, "must be a past date") {
 		t.Fatalf("unexpected response description '%s'", res.ResponseDescription)
@@ -103,7 +104,7 @@ func testOpenReport(t *testing.T, c *NCMECClient) {
 	}
 
 	// open a report in the past
-	now = time.Now().Add(-time.Hour)
+	now = time.Now().UTC().Add(-time.Hour)
 	report = newTestReport(now)
 	res, err = c.openReport(report)
 	if err != nil {
@@ -111,8 +112,8 @@ func testOpenReport(t *testing.T, c *NCMECClient) {
 	}
 
 	// assert the response
-	if res.ResponseCode != 0 {
-		t.Fatalf("unexpected response code, %v != 0", res.ResponseCode)
+	if res.ResponseCode != ncmecStatusOK {
+		t.Fatalf("unexpected response code, %v != %v", res.ResponseCode, ncmecStatusOK)
 	}
 	if res.ResponseDescription != "Success" {
 		t.Fatalf("unexpected response description '%s'", res.ResponseDescription)
@@ -132,8 +133,8 @@ func testStatus(t *testing.T, c *NCMECClient) {
 	}
 
 	// assert the response
-	if res.ResponseCode != 0 {
-		t.Fatalf("unexpected response code, %v != 0", res.ResponseCode)
+	if res.ResponseCode != ncmecStatusOK {
+		t.Fatalf("unexpected response code, %v != %v", res.ResponseCode, ncmecStatusOK)
 	}
 }
 
@@ -152,7 +153,7 @@ func newTestReport(date time.Time) report {
 				Url: []string{"http://badsite.com/baduri.html"},
 			},
 		},
-		Reporter: ncmecReporter{
+		Reporter: NCMECReporter{
 			ReportingPerson: ncmecReportingPerson{
 				FirstName: "John",
 				LastName:  "Smith",
