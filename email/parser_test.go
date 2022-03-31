@@ -12,7 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"gitlab.com/SkynetLabs/skyd/skymodules"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
@@ -228,7 +227,7 @@ func testBuildAbuseReport(t *testing.T) {
 	logger.Out = ioutil.Discard
 
 	// create test database
-	db, err := newTestDatabase(ctx, "testBuildAbuseReport", logger)
+	db, err := database.NewTestAbuseScannerDB(ctx, "testBuildAbuseReport", logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,12 +305,4 @@ func testBuildAbuseReport(t *testing.T) {
 	if pr.Reporter.Email != "someone@gmail.com" {
 		t.Fatal("unexpected reporter", pr.Reporter.Email)
 	}
-}
-
-// newTestDatabase returns a test database with given name.
-func newTestDatabase(ctx context.Context, dbName string, logger *logrus.Logger) (*database.AbuseScannerDB, error) {
-	return database.NewAbuseScannerDB(ctx, "", "mongodb://localhost:37017", dbName, options.Credential{
-		Username: "admin",
-		Password: "aO4tV5tC1oU3oQ7u",
-	}, logger)
 }
