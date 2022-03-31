@@ -33,7 +33,7 @@ func TestAbuseScannerDB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
 	defer cancel()
 
-	db, err := NewTestDatabase(ctx, t.Name(), nil)
+	db, err := NewTestAbuseScannerDB(ctx, t.Name(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,60 +120,15 @@ func testFindUnfinalized(ctx context.Context, t *testing.T, db *AbuseScannerDB) 
 		t.Fatal(err)
 	}
 
-	// insert one email - simple case
+	// insert one email
 	email := newTestEmail()
 	email.Parsed = true
 	email.Blocked = true
 	email.Finalized = false
-	email.ParseResult = AbuseReport{Tags: []string{"terrorism"}}
 	err = db.InsertOne(email)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// assert we can find it
-	firstUID := email.UID
-	if err := assertCount(1, "INBOX"); err != nil {
-		t.Fatal(err)
-	}
-
-	// insert a second email - complex case
-	email = newTestEmail()
-	email.Parsed = true
-	email.Blocked = true
-	email.Finalized = false
-	email.Reported = false // this makes it not-ready-for-finalization
-	email.ParseResult = AbuseReport{Tags: []string{"csam"}}
-	err = db.InsertOne(email)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert there's still only one
-	if err := assertCount(1, "INBOX"); err != nil {
-		t.Fatal(err)
-	}
-
-	// update the 2nd one to mark it as reported
-	second, err := db.FindOne(email.UID)
-	db.UpdateNoLock(*second, bson.D{
-		{"$set", bson.D{
-			{"reported", true},
-		}},
-	})
-
-	// assert we can now find two
-	if err := assertCount(2, "INBOX"); err != nil {
-		t.Fatal(err)
-	}
-
-	// update the 1st one to mark it as finalized
-	first, err := db.FindOne(firstUID)
-	db.UpdateNoLock(*first, bson.D{
-		{"$set", bson.D{
-			{"finalized", true},
-		}},
-	})
 
 	// assert there's a single unfinalized email now
 	if err := assertCount(1, "INBOX"); err != nil {
@@ -216,10 +171,10 @@ func testFindUnparsed(ctx context.Context, t *testing.T, db *AbuseScannerDB) {
 		t.Fatal(err)
 	}
 	unparsed.Parsed = true
-	err = db.UpdateNoLock(*unparsed, bson.D{
-		{"$set", bson.D{
-			{"parsed", true},
-		}},
+	err = db.UpdateNoLock(*unparsed, bson.M{
+		"$set": bson.M{
+			"parsed": true,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -246,9 +201,7 @@ func testFindUnreported(ctx context.Context, t *testing.T, db *AbuseScannerDB) {
 	// insert an email
 	email := newTestEmail()
 	email.Parsed = true
-	email.Blocked = true
 	email.Reported = false
-	email.Finalized = false
 	email.ParseResult = AbuseReport{Tags: []string{"terrorism"}}
 	err = db.InsertOne(email)
 	if err != nil {
@@ -265,10 +218,10 @@ func testFindUnreported(ctx context.Context, t *testing.T, db *AbuseScannerDB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.UpdateNoLock(*first, bson.D{
-		{"$set", bson.D{
-			{"parse_result", AbuseReport{Tags: []string{"csam"}}},
-		}},
+	err = db.UpdateNoLock(*first, bson.M{
+		"$set": bson.M{
+			"parse_result": AbuseReport{Tags: []string{"csam"}},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -280,11 +233,26 @@ func testFindUnreported(ctx context.Context, t *testing.T, db *AbuseScannerDB) {
 	}
 
 	// update the email to be reported
-	err = db.UpdateNoLock(*first, bson.D{
-		{"$set", bson.D{
-			{"reported", true},
-		}},
+	err = db.UpdateNoLock(*first, bson.M{
+		"$set": bson.M{
+			"reported": true,
+		},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's no unreported emails
+	if err := assertCount(db.FindUnreported, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	// insert a csam email but make it unparsed
+	email = newTestEmail()
+	email.Parsed = false
+	email.Reported = false
+	email.ParseResult = AbuseReport{Tags: []string{"csam"}}
+	err = db.InsertOne(email)
 	if err != nil {
 		t.Fatal(err)
 	}

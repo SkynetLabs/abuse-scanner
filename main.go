@@ -82,14 +82,14 @@ func main() {
 	}
 
 	// create a database instance
-	db, err := database.NewAbuseScannerDB(ctx, serverDomain, mongoUri, database.DBAbuseScanner, mongoCreds, logger)
+	abuseDB, err := database.NewAbuseScannerDB(ctx, serverDomain, database.DBAbuseScanner, mongoUri, mongoCreds, logger)
 	if err != nil {
 		log.Fatalf("Failed to initialize database client, err: %v", err)
 	}
 
 	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
-	fetcher := email.NewFetcher(ctx, db, emailCredentials, abuseMailbox, serverDomain, logger)
+	fetcher := email.NewFetcher(ctx, abuseDB, emailCredentials, abuseMailbox, serverDomain, logger)
 	err = fetcher.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email fetcher, err: ", err)
@@ -98,7 +98,7 @@ func main() {
 	// create a new mail parser, it parses any email that's not parsed yet for
 	// abuse skylinks and a set of abuse tag
 	logger.Info("Initializing email parser...")
-	parser := email.NewParser(ctx, db, serverDomain, abuseSponsor, logger)
+	parser := email.NewParser(ctx, abuseDB, serverDomain, abuseSponsor, logger)
 	err = parser.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email parser, err: ", err)
@@ -108,7 +108,7 @@ func main() {
 	// parsed but not blocked yet, it uses the blocker API for this.
 	logger.Info("Initializing blocker...")
 	blockerApiUrl := fmt.Sprintf("http://%s:%s", blockerHost, blockerPort)
-	blocker := email.NewBlocker(ctx, blockerApiUrl, db, logger)
+	blocker := email.NewBlocker(ctx, blockerApiUrl, abuseDB, logger)
 	err = blocker.Start()
 	if err != nil {
 		log.Fatal("Failed to start the blocker, err: ", err)
@@ -119,7 +119,7 @@ func main() {
 	// when the abuse scanner has replied with a report of all the skylinks that
 	// have been found and blocked.
 	logger.Info("Initializing finalizer...")
-	finalizer := email.NewFinalizer(ctx, db, emailCredentials, abuseMailaddress, abuseMailbox, serverDomain, logger)
+	finalizer := email.NewFinalizer(ctx, abuseDB, emailCredentials, abuseMailaddress, abuseMailbox, serverDomain, logger)
 	err = finalizer.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email finalizer, err: ", err)
@@ -128,6 +128,7 @@ func main() {
 	// create a new reporter, it will scan for emails that contain CSAM and
 	// report those instances to NCMEC.
 	var reporter *email.Reporter
+	var skynetDB *database.SkynetDB
 	if ncmecReportingEnabled {
 		// load NCMEC credentials
 		ncmecCredentials, err := email.LoadNCMECCredentials()
@@ -141,8 +142,14 @@ func main() {
 			log.Fatal("Failed to load NCMEC reporter", err)
 		}
 
+		// create a skynet database instance
+		skynetDB, err = database.NewSkynetDB(ctx, database.DBSkynet, mongoUri, mongoCreds, logger)
+		if err != nil {
+			log.Fatalf("Failed to initialize skynet database client, err: %v", err)
+		}
+
 		logger.Info("Initializing reporter...")
-		reporter := email.NewReporter(db, ncmecCredentials, abusePortalURL, ncmecReporter, logger)
+		reporter := email.NewReporter(abuseDB, skynetDB, ncmecCredentials, abusePortalURL, ncmecReporter, logger)
 		err = reporter.Start()
 		if err != nil {
 			log.Fatal("Failed to start the NCMEC reporter, err: ", err)
@@ -157,7 +164,7 @@ func main() {
 	// on exit call cancel and stop all components
 	cancel()
 	err = errors.Compose(
-		db.Close(),
+		abuseDB.Close(),
 		fetcher.Stop(),
 		parser.Stop(),
 		blocker.Stop(),
@@ -166,6 +173,7 @@ func main() {
 	if reporter != nil {
 		err = errors.Compose(
 			err,
+			skynetDB.Close(),
 			reporter.Stop(),
 		)
 	}

@@ -15,9 +15,9 @@ func TestNCMECClient(t *testing.T) {
 	}
 	t.Parallel()
 
-	os.Setenv("NCMEC_USERNAME", "Siasky")
-	os.Setenv("NCMEC_PASSWORD", "Ug7=Ba3=Qg2@")
-	os.Setenv("NCMEC_DEBUG", "true")
+	os.Setenv("NCMEC_USERNAME", "")
+	os.Setenv("NCMEC_PASSWORD", "")
+	os.Setenv("NCMEC_DEBUG", "")
 
 	// load credentials from env
 	creds, err := LoadNCMECCredentials()
@@ -146,7 +146,7 @@ func newTestReport(date time.Time) report {
 
 		IncidentSummary: ncmecIncidentSummary{
 			IncidentType:     "Child Pornography (possession, manufacture, and distribution)",
-			IncidentDateTime: date.Format("2006-01-02T15:04:05Z"),
+			IncidentDateTime: date.Format(time.RFC3339),
 		},
 		InternetDetails: ncmecInternetDetails{
 			ncmecWebPageIncident{
@@ -154,11 +154,26 @@ func newTestReport(date time.Time) report {
 			},
 		},
 		Reporter: NCMECReporter{
-			ReportingPerson: ncmecReportingPerson{
+			ReportingPerson: ncmecPerson{
 				FirstName: "John",
 				LastName:  "Smith",
 				Email:     "jsmith@example.com",
 			},
+		},
+		Uploader: ncmecReportedPerson{
+			UserReported: ncmecPerson{
+				FirstName: "John",
+				LastName:  "Doe",
+				Email:     "jdoe@example.com",
+			},
+			IPCaptureEvent: []ncmecIPCaptureEvent{
+				{
+					IPAddress: "13.192.32.50",
+					EventName: "Upload",
+					Date:      time.Now().UTC().Format(time.RFC3339),
+				},
+			},
+			AdditionalInfo: "Some more information",
 		},
 	}
 }

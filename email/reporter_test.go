@@ -3,11 +3,11 @@ package email
 import (
 	"abuse-scanner/database"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -28,12 +28,8 @@ func TestReporter(t *testing.T) {
 		test func(t *testing.T)
 	}{
 		{
-			name: "EmailToReport",
-			test: testEmailToReport,
-		},
-		{
-			name: "ReportMessages",
-			test: testReportMessages,
+			name: "Reporter",
+			test: testReporter,
 		},
 	}
 	for _, test := range tests {
@@ -41,13 +37,16 @@ func TestReporter(t *testing.T) {
 	}
 }
 
-// testReportMessages verifies the messages that contain csam get reported
-func testReportMessages(t *testing.T) {
+// testReporter verifies the messages that contain csam get corresponding NCMEC
+// reports in the database and those reports get filed with NCMEC.
+//
+// NOTE: this test covers the full functionality of the reporter
+func testReporter(t *testing.T) {
 	t.Parallel()
 
-	os.Setenv("NCMEC_USERNAME", "Siasky")
-	os.Setenv("NCMEC_PASSWORD", "Ug7=Ba3=Qg2@")
-	os.Setenv("NCMEC_DEBUG", "true")
+	os.Setenv("NCMEC_USERNAME", "")
+	os.Setenv("NCMEC_PASSWORD", "")
+	os.Setenv("NCMEC_DEBUG", "")
 
 	// load credentials from env
 	creds, err := LoadNCMECCredentials()
@@ -69,47 +68,92 @@ func testReportMessages(t *testing.T) {
 	logger := logrus.New()
 	logger.Out = ioutil.Discard
 
-	// create a database
-	db, err := database.NewTestDatabase(ctx, t.Name(), logger)
+	// create the abuse databases
+	abuseDBName := t.Name() + "_AbuseDB"
+	abuseDB, err := database.NewTestAbuseScannerDB(ctx, abuseDBName, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := db.Close(); err != nil {
+		if err := abuseDB.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}()
-	err = db.Purge(ctx)
+
+	// create a skynet database
+	skynetDBName := t.Name() + "_SkynetDB"
+	skynetDB, err := database.NewTestSkynetDB(ctx, skynetDBName, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := skynetDB.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// insert 4 uploads, where 2 of them are made by 1 uploader, 1 done by
+	// another and the fourth by an anonymous/unknown user
+	uploadedAt1 := time.Now().Add(-time.Hour).UTC()
+	insertTestUpload(
+		skynetDB,
+		"AADhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJCC",
+		"81.196.117.164",
+		"user.one@gmail.com",
+		uploadedAt1,
+	)
+	uploadedAt2 := time.Now().Add(-2 * time.Hour).UTC()
+	insertTestUpload(
+		skynetDB,
+		"BBDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJDD",
+		"", // no IP
+		"user.one@gmail.com",
+		uploadedAt2,
+	)
+	uploadedAt3 := time.Now().Add(-3 * time.Hour).UTC()
+	insertTestUpload(
+		skynetDB,
+		"CCDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJEE",
+		"13.192.32.50",
+		"user.two@gmail.com",
+		uploadedAt3,
+	)
+
+	// the 4th one is not inserted as it's an unknown/anonymous uploader
 
 	// create a reporter
-	reporter := NewReporter(db, creds, "https://siasky.net", testReporter(), logger)
+	reporter := newTestReporter()
+	r := NewReporter(abuseDB, skynetDB, creds, "https://siasky.net", reporter, logger)
 
 	// insert an email to report
+	insertedAt := time.Now().UTC()
 	email := database.AbuseEmail{
 		ID:  primitive.NewObjectID(),
 		UID: "INBOX-0",
 
 		Parsed:    true,
 		Blocked:   true,
+		Finalized: true,
 		Reported:  false,
-		Finalized: false,
 
 		ParseResult: database.AbuseReport{
-			Tags:     []string{"csam"},
-			Skylinks: []string{"AADhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJCC"}},
+			Tags: []string{"csam"},
+			Skylinks: []string{
+				"AADhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJCC",
+				"BBDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJDD",
+				"CCDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJEE",
+				"DDDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJFF",
+			}},
 
-		InsertedAt: time.Now().UTC(),
+		InsertedAt: insertedAt,
 	}
-	err = db.InsertOne(email)
+	err = abuseDB.InsertOne(email)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert there's one unreported email
-	unreported, err := db.FindUnreported()
+	unreported, err := abuseDB.FindUnreported()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,21 +162,21 @@ func testReportMessages(t *testing.T) {
 	}
 
 	// start the reporter
-	err = reporter.Start()
+	err = r.Start()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// defer stop
 	defer func() {
-		if err := reporter.Stop(); err != nil {
+		if err := r.Stop(); err != nil {
 			t.Fatal(err)
 		}
 	}()
 
 	// assert there's no unreported emails left in a retry
 	err = build.Retry(100, 100*time.Millisecond, func() error {
-		unreported, err := db.FindUnreported()
+		unreported, err := abuseDB.FindUnreported()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,8 +189,23 @@ func testReportMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// assert there's no unfiled reports left in a retry
+	err = build.Retry(100, 100*time.Millisecond, func() error {
+		unfiled, err := abuseDB.FindUnfiledReports()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(unfiled) != 0 {
+			return fmt.Errorf("unexpected number of unfiled reports, %v != 0", len(unfiled))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// find our email
-	reported, err := db.FindOne(email.UID)
+	reported, err := abuseDB.FindOne(email.UID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,102 +217,131 @@ func testReportMessages(t *testing.T) {
 	if reported.ReportedAt == (time.Time{}) {
 		t.Fatal("unexpected reported at", reported.ReportedAt)
 	}
-	if reported.NCMECReportId == 0 {
-		t.Fatal("unexpected NCMEC report id", reported.NCMECReportId)
-	}
-	if reported.NCMECReportErr != "" {
-		t.Fatal("unexpected NCMEC report err", reported.NCMECReportErr)
-	}
-}
 
-// testEmailToReport is a unit test that covers the emailToReport helper.
-func testEmailToReport(t *testing.T) {
-	t.Parallel()
-
-	// create a discard logger
-	logger := logrus.New()
-	logger.Out = ioutil.Discard
-
-	// create a dummy reporter (doesn't have to hold actual credentials)
-	var creds NCMECCredentials
-	reporter := testReporter()
-	r := NewReporter(nil, creds, "https://siasky.net", reporter, logger)
-
-	// create a dummy email
-	now := time.Now().UTC()
-	email := database.AbuseEmail{
-		From:      "someone@gmail.com",
-		Subject:   "Abuse Subject",
-		MessageID: "<msg_uid>@gmail.com",
-
-		ParseResult: database.AbuseReport{
-			Skylinks: []string{
-				"AADhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJCC",
-				"AABa7mP11o9H6xEHPGmIXP__F-7GcegHIwpxeqEMTCzBCC",
-				"_ATzhlAwQbJ-GmrsFCxM7la9Mn_x7WgOrhi-ILrd7PMFCC",
-			},
-		},
-		Parsed:    false,
-		Blocked:   true,
-		Finalized: false,
-
-		InsertedBy: "dev.siasky.net",
-		InsertedAt: now,
-	}
-
-	// generate a report - test error flow
-	actual, err := r.emailToReport(email)
-	if err == nil || !strings.Contains(err.Error(), "email has to be parsed") {
-		t.Fatal(err)
-	}
-	email.Parsed = true
-	actual, err = r.emailToReport(email)
-	if err == nil || !strings.Contains(err.Error(), "email has to contain csam") {
-		t.Fatal(err)
-	}
-	email.ParseResult.Tags = []string{"csam"}
-
-	// generate a report
-	actual, err = r.emailToReport(email)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// draft the report we expect
-	expected := report{
-		Xsi:                       "http://www.w3.org/2001/XMLSchema-instance",
-		NoNamespaceSchemaLocation: "https://report.cybertip.org/ispws/xsd",
-
+	// draft the 3 reports we expect
+	expected1 := report{
 		IncidentSummary: ncmecIncidentSummary{
 			IncidentType:     "Child Pornography (possession, manufacture, and distribution)",
-			IncidentDateTime: now.Format("2006-01-02T15:04:05Z"),
+			IncidentDateTime: insertedAt.Format(time.RFC3339),
 		},
 		InternetDetails: ncmecInternetDetails{
 			ncmecWebPageIncident{
 				ThirdPartyHostedContent: true,
 				Url: []string{
 					"https://siasky.net/AADhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJCC",
-					"https://siasky.net/AABa7mP11o9H6xEHPGmIXP__F-7GcegHIwpxeqEMTCzBCC",
-					"https://siasky.net/_ATzhlAwQbJ-GmrsFCxM7la9Mn_x7WgOrhi-ILrd7PMFCC",
+					"https://siasky.net/BBDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJDD",
+				},
+			},
+		},
+		Reporter: newTestReporter(),
+		Uploader: ncmecReportedPerson{
+			UserReported: ncmecPerson{
+				Email: "user.one@gmail.com",
+			},
+			IPCaptureEvent: []ncmecIPCaptureEvent{
+				{
+					IPAddress: "81.196.117.164",
+					EventName: "Upload",
+					Date:      uploadedAt1.Format(time.RFC3339),
+				},
+			},
+		},
+	}
+	expected2 := report{
+		IncidentSummary: ncmecIncidentSummary{
+			IncidentType:     "Child Pornography (possession, manufacture, and distribution)",
+			IncidentDateTime: insertedAt.Format(time.RFC3339),
+		},
+		InternetDetails: ncmecInternetDetails{
+			ncmecWebPageIncident{
+				ThirdPartyHostedContent: true,
+				Url: []string{
+					"https://siasky.net/CCDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJEE",
+				},
+			},
+		},
+		Reporter: reporter,
+		Uploader: ncmecReportedPerson{
+			UserReported: ncmecPerson{
+				Email: "user.two@gmail.com",
+			},
+			IPCaptureEvent: []ncmecIPCaptureEvent{
+				{
+					IPAddress: "13.192.32.50",
+					EventName: "Upload",
+					Date:      uploadedAt3.Format(time.RFC3339),
+				},
+			},
+		},
+	}
+	expected3 := report{
+		IncidentSummary: ncmecIncidentSummary{
+			IncidentType:     "Child Pornography (possession, manufacture, and distribution)",
+			IncidentDateTime: insertedAt.Format(time.RFC3339),
+		},
+		InternetDetails: ncmecInternetDetails{
+			ncmecWebPageIncident{
+				ThirdPartyHostedContent: true,
+				Url: []string{
+					"https://siasky.net/DDDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJFF",
 				},
 			},
 		},
 		Reporter: reporter,
 	}
 
-	// assert the report looks exactly as we suspect it
-	if !reflect.DeepEqual(expected, actual) {
-		t.Fatal("unexpected report", actual)
+	// find NCMEC reports
+	ncmecReports, err := abuseDB.FindReports(email.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ncmecReports) != 3 {
+		t.Fatalf("unexpected number of reports, %v != 3", len(ncmecReports))
+	}
+
+	// unmarshal them into actual reports
+	var reports []report
+	for _, ncmecReport := range ncmecReports {
+		var report report
+		err := xml.Unmarshal([]byte(ncmecReport.Report), &report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reports = append(reports, report)
+	}
+
+	for _, report := range reports {
+		if !(reflect.DeepEqual(report, expected1) ||
+			reflect.DeepEqual(report, expected2) ||
+			reflect.DeepEqual(report, expected3)) {
+			buf, _ := xml.MarshalIndent(report, "", "\t")
+			t.Fatal("unexpected report", string(buf))
+		}
 	}
 }
 
-// testReporter returns a reporter object for use in testing.
-func testReporter() NCMECReporter {
+// newTestReporter returns a reporter object for use in testing.
+func newTestReporter() NCMECReporter {
 	return NCMECReporter{
-		ReportingPerson: ncmecReportingPerson{
+		ReportingPerson: ncmecPerson{
 			FirstName: "SkynetLabs",
 			LastName:  "Inc.",
 			Email:     "abuse@skynetlabs.com",
 		},
+	}
+}
+
+// insertTestUpload is a helper function that inserts a dummy upload with given
+// properties.
+func insertTestUpload(db *database.SkynetDB, uploadedSkylink, uploaderIP, uploaderEmail string, uploadTimestamp time.Time) {
+	if err := db.InsertTestUpload(&database.SkynetUploadHydrated{
+		SkynetUpload: database.SkynetUpload{
+			UploaderIP: uploaderIP,
+			Timestamp:  uploadTimestamp,
+		},
+		Skylink: uploadedSkylink,
+		User:    &database.SkynetUser{Email: uploaderEmail}},
+	); err != nil {
+		build.Critical(err)
 	}
 }

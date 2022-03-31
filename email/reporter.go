@@ -2,6 +2,7 @@ package email
 
 import (
 	"abuse-scanner/database"
+	"encoding/xml"
 	"fmt"
 	"sync"
 	"time"
@@ -9,50 +10,83 @@ import (
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.sia.tech/siad/build"
 )
 
 const (
-	// reportingFrequency defines the frequency with which we scan the database
-	// to report csam reports to NCMEC
-	reportingFrequency = 30 * time.Second
-
 	// maxShutdownTimeout is the amount of time we wait on the waitgroup when
 	// Stop is being called before returning an error that indicates an unclean
 	// shutdown.
 	maxShutdownTimeout = time.Minute
 )
 
+var (
+	// ncmecFileFrequency defines the frequency with which we file reports to
+	// NCMEC.
+	ncmecFileFrequency = build.Select(build.Var{
+		Dev:      30 * time.Second,
+		Standard: 4 * time.Hour,
+		Testing:  3 * time.Second,
+	}).(time.Duration)
+
+	// reportingFrequency defines the frequency with which we scan the database
+	// to build NCMEC reports from abuse emails
+	reportingFrequency = build.Select(build.Var{
+		Dev:      30 * time.Second,
+		Standard: 30 * time.Minute,
+		Testing:  3 * time.Second,
+	}).(time.Duration)
+)
+
 type (
 	// Reporter is an object that will periodically scan the database for CSAM
 	// abuse reports that have not been reported to NCMEC yet.
 	Reporter struct {
-		staticClient    *NCMECClient
-		staticDatabase  *database.AbuseScannerDB
-		staticLogger    *logrus.Entry
-		staticPortalURL string
-		staticReporter  NCMECReporter
-		staticStopChan  chan struct{}
-		staticWaitGroup sync.WaitGroup
+		staticAbuseDatabase  *database.AbuseScannerDB
+		staticClient         *NCMECClient
+		staticLogger         *logrus.Entry
+		staticPortalURL      string
+		staticReporter       NCMECReporter
+		staticSkynetDatabase *database.SkynetDB
+		staticStopChan       chan struct{}
+		staticWaitGroup      sync.WaitGroup
 	}
 )
 
 // NewReporter creates a new reporter.
-func NewReporter(database *database.AbuseScannerDB, creds NCMECCredentials, portalURL string, reporter NCMECReporter, logger *logrus.Logger) *Reporter {
+func NewReporter(abuseDB *database.AbuseScannerDB, skynetDB *database.SkynetDB, creds NCMECCredentials, portalURL string, reporter NCMECReporter, logger *logrus.Logger) *Reporter {
 	return &Reporter{
-		staticClient:    NewNCMECClient(creds),
-		staticDatabase:  database,
-		staticLogger:    logger.WithField("module", "Reporter"),
-		staticPortalURL: portalURL,
-		staticReporter:  reporter,
-		staticStopChan:  make(chan struct{}),
+		staticAbuseDatabase:  abuseDB,
+		staticClient:         NewNCMECClient(creds),
+		staticLogger:         logger.WithField("module", "Reporter"),
+		staticPortalURL:      portalURL,
+		staticReporter:       reporter,
+		staticSkynetDatabase: skynetDB,
+		staticStopChan:       make(chan struct{}),
 	}
 }
 
 // Start initializes the reporter process.
 func (r *Reporter) Start() error {
+	// check the status endpoint before we start this module
+	res, err := r.staticClient.status()
+	if err != nil {
+		return fmt.Errorf("unexpected response from NCMEC API, err %v", err)
+	}
+	if res.ResponseCode != ncmecStatusOK {
+		return fmt.Errorf("unexpected status response from NCMEC API, status %v", res.ResponseCode)
+	}
+
 	r.staticWaitGroup.Add(1)
 	go func() {
-		r.threadedReportMessages()
+		r.threadedBuildReports()
+		r.staticWaitGroup.Done()
+	}()
+
+	r.staticWaitGroup.Add(1)
+	go func() {
+		r.threadedFileReports()
 		r.staticWaitGroup.Done()
 	}()
 	return nil
@@ -75,164 +109,12 @@ func (r *Reporter) Stop() error {
 	}
 }
 
-// emailToReports returns a report containing every unique skylink in the
-// original email report, note that only csam links will be turned into a report
-// to NCMEC.
-func (r *Reporter) emailToReport(email database.AbuseEmail) (report, error) {
-	// sanity check it's parsed
-	if !email.Parsed {
-		return report{}, errors.New("email has to be parsed")
-	}
-
-	// sanity check it's csam
-	pr := email.ParseResult
-	if !pr.HasTag("csam") {
-		return report{}, errors.New("email has to contain csam")
-	}
-
-	// construct the urls
-	urls := make([]string, len(pr.Skylinks))
-	for i, skylink := range pr.Skylinks {
-		urls[i] = fmt.Sprintf("%s/%s", r.staticPortalURL, skylink)
-	}
-
-	return report{
-		Xsi:                       "http://www.w3.org/2001/XMLSchema-instance",
-		NoNamespaceSchemaLocation: "https://report.cybertip.org/ispws/xsd",
-
-		IncidentSummary: ncmecIncidentSummary{
-			IncidentType:     "Child Pornography (possession, manufacture, and distribution)",
-			IncidentDateTime: email.InsertedAt.Format("2006-01-02T15:04:05Z"),
-		},
-		InternetDetails: ncmecInternetDetails{
-			ncmecWebPageIncident{
-				ThirdPartyHostedContent: true,
-				Url:                     urls,
-			},
-		},
-		Reporter: r.staticReporter,
-	}, nil
-}
-
-// finishReport will finish the report with NCMEC
-func (r *Reporter) finishReport(email database.AbuseEmail) error {
+// buildReports fetches all abuse emails from the database that have not been
+// converted to NCMEC reports yet and converts those emails to a set of NCMEC
+// reports.
+func (r *Reporter) buildReports() {
 	// convenience variables
-	logger := r.staticLogger
-
-	// finish the report with NCMEC
-	var reportErr string
-	res, err := r.staticClient.finishReport(email.NCMECReportId)
-	if err == nil && res.ResponseCode != ncmecStatusOK {
-		err = fmt.Errorf("unexpected response code %v when finishing report for email '%v'", res.ResponseCode, email.ID.Hex())
-	}
-	if err != nil {
-		reportErr = err.Error()
-		logger.Errorf("failed to finish report %v, err '%v'", email.NCMECReportId, err)
-	}
-
-	// update the email and set the report err and reported flag
-	err = r.staticDatabase.UpdateNoLock(email, bson.M{
-		"$set": bson.M{
-			"reported": err == nil,
-
-			"ncmec_report_id":  email.NCMECReportId,
-			"ncmec_report_err": reportErr,
-		},
-	})
-	if err != nil {
-		logger.Errorf("failed to update email %v with report id %v, err '%v'", email.MessageID, email.NCMECReportId, err)
-		return err
-	}
-	return nil
-}
-
-// openReport will open a report with NCMEC for the given email, it will
-// decorate the abuse email with the report id
-func (r *Reporter) openReport(email database.AbuseEmail) (uint64, error) {
-	// convenience variables
-	logger := r.staticLogger
-
-	// convert the abuse email into a NCMEC report
-	report, err := r.emailToReport(email)
-	if err != nil {
-		return 0, err
-	}
-
-	// open the report
-	reportedAt := time.Now().UTC()
-	resp, err := r.staticClient.openReport(report)
-	if err == nil && resp.ResponseCode != ncmecStatusOK {
-		err = fmt.Errorf("unexpected response code %v when opening report for email '%v'", resp.ResponseCode, email.ID.Hex())
-	}
-	if err != nil {
-		// update the email and set the report err
-		err = errors.Compose(err, r.staticDatabase.UpdateNoLock(email, bson.M{
-			"$set": bson.M{
-				"ncmec_report_err": err.Error(),
-			},
-		}))
-		logger.Errorf("failed to open report, err '%v'", err)
-		return 0, err
-	}
-	reportId := resp.ReportId
-
-	// update the email and set the report id
-	err = r.staticDatabase.UpdateNoLock(email, bson.M{
-		"$set": bson.M{
-			"reported_at":     reportedAt,
-			"ncmec_report_id": reportId,
-		},
-	})
-	if err != nil {
-		logger.Errorf("failed to update email %v with report id %v, err '%v'", email.MessageID, reportId, err)
-		return reportId, nil
-	}
-
-	return reportId, nil
-}
-
-// reportEmail will report the given email to NCMEC, it does so by interacting
-// with the NCMEC API.
-func (r *Reporter) reportEmail(email database.AbuseEmail) error {
-	// convenience variables
-	logger := r.staticLogger
-
-	// if the email has an NCMEC report id, it means something went wrong when
-	// trying to finish the report last time, so we try again.
-	if email.NCMECReportId != 0 {
-		return r.finishReport(email)
-	}
-
-	// otherwise open a report with NCMEC
-	reportId, err := r.openReport(email)
-	if err != nil {
-		logger.Errorf("failed to open report, error '%v'", err)
-	}
-
-	// only if the report id is 0 we want to escape, if it is not 0 it means
-	// a report has been opened but something went wrong after opening the
-	// report, in that case we want to try and continue to finish the report
-	if reportId == 0 {
-		return err
-	}
-
-	// set the report id and finish the report
-	email.NCMECReportId = reportId
-	err = r.finishReport(email)
-	if err != nil {
-		logger.Errorf("failed to open report, error '%v'", err)
-		return err
-	}
-
-	return nil
-}
-
-// reportMessages fetches all unreported messages from the database and reports
-// them to NCMEC. Reporting only applies to emails which have been tagged with
-// CSAM, we report those messages and the content we find inside them to NCMEC.
-func (r *Reporter) reportMessages() {
-	// convenience variables
-	abuseDB := r.staticDatabase
+	abuseDB := r.staticAbuseDatabase
 	logger := r.staticLogger
 
 	// fetch all unreported emails
@@ -245,24 +127,347 @@ func (r *Reporter) reportMessages() {
 	// log unreported message count
 	numUnreported := len(toReport)
 	if numUnreported == 0 {
-		logger.Debugf("Found %v unreported messages", numUnreported)
+		logger.Debugf("Found %v unreported abuse emails", numUnreported)
 		return
 	}
 
-	logger.Infof("Found %v unreported messages", numUnreported)
+	logger.Infof("Found %v unreported abuse emails", numUnreported)
 
 	// loop all emails and report them
 	for _, email := range toReport {
-		err := r.reportEmail(email)
+		err := r.buildReportsForEmail(email)
 		if err != nil {
-			logger.Errorf("Failed to report email %v, error %v", email.UID, err)
+			logger.Errorf("Failed building NCMEC reports for email %v, error %v", email.UID, err)
 		}
 	}
 }
 
-// threadedReportMessages will periodically fetch email messages that have not
-// been tagged as csam and have not been reported to NCMEC yet.
-func (r *Reporter) threadedReportMessages() {
+// buildReportsForEmail will build a set of NCMEC reports for the given email
+// and persist them in the database. One abuse email can explode into a set of
+// NCMEC reports as those reports are unique to a single uploader, if we have
+// that information.
+func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
+	// convenience variables
+	logger := r.staticLogger
+	abuseDB := r.staticAbuseDatabase
+	skynetDB := r.staticSkynetDatabase
+
+	// acquire a lock on the email
+	lock := abuseDB.NewLock(email.UID)
+	err := lock.Lock()
+	if err != nil {
+		return errors.AddContext(err, "could not acquire lock")
+	}
+
+	// defer the unlock
+	defer func() {
+		unlockErr := lock.Unlock()
+		if unlockErr != nil {
+			err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
+			return
+		}
+	}()
+
+	// under lock, check whether the email has not been reported yet by another
+	// process, if so we simply return
+	current, err := abuseDB.FindOne(email.UID)
+	if err != nil {
+		return errors.AddContext(err, "could not find email")
+	}
+	if current.Reported {
+		return nil
+	}
+
+	// find the uploads corresponding to the abusive skylinks, we group them by
+	// uploader because an NCMEC report should be unique to the person uploading
+	// the abusive content
+	skylinks := email.ParseResult.Skylinks
+	uploadsPerUser, err := skynetDB.FindUploadsPerUser(skylinks)
+	if err != nil {
+		return errors.AddContext(err, "could not find uploads")
+	}
+
+	// build the report for every uploaders and set of skylinks, and insert it
+	// into the database, another process will file the report with NCMEC
+	for _, uploads := range uploadsPerUser {
+		report := r.buildReportForUploads(email.InsertedAt, uploads)
+		reportBytes, err := xml.Marshal(&report)
+		if err != nil {
+			logger.Errorf("failed to build report, err %v", err)
+			continue
+		}
+
+		// constract the initial report, this does not contain any uploader info
+		err = abuseDB.InsertReport(
+			database.NCMECReport{
+				ID:         primitive.NewObjectID(),
+				EmailID:    email.ID,
+				UserID:     uploads[0].SkynetUpload.UserID,
+				Report:     string(reportBytes),
+				InsertedAt: time.Now().UTC(),
+			},
+		)
+		if err != nil {
+			logger.Errorf("failed to insert report, err %v", err)
+			continue
+		}
+	}
+
+	// update the email
+	err = abuseDB.UpdateNoLock(email, bson.M{
+		"$set": bson.M{
+			"reported":    true,
+			"reported_at": time.Now().UTC(),
+		},
+	})
+	if err != nil {
+		return errors.AddContext(err, "could not update email")
+	}
+	return nil
+}
+
+// buildReportForUploads takes an email and a set of uploads and returns an
+// NCMEC report
+func (r *Reporter) buildReportForUploads(date time.Time, uploads []*database.SkynetUploadHydrated) report {
+	// convenience variables
+	portalURL := r.staticPortalURL
+	user := uploads[0].User // this is safe
+
+	// construct the urls
+	var urls []string
+	for _, upload := range uploads {
+		urls = append(urls, fmt.Sprintf("%s/%s", portalURL, upload.Skylink))
+	}
+
+	// construct the ip catures
+	var ipCaptures []ncmecIPCaptureEvent
+	for _, upload := range uploads {
+		if upload.UploaderIP == "" {
+			continue
+		}
+		ipCaptures = append(ipCaptures, ncmecIPCaptureEvent{
+			IPAddress: upload.UploaderIP,
+			EventName: "Upload",
+			Date:      upload.Timestamp.Format(time.RFC3339),
+		})
+	}
+
+	// construct the uploader
+	var uploader *ncmecReportedPerson
+	if len(ipCaptures) > 0 {
+		if uploader == nil {
+			uploader = &ncmecReportedPerson{}
+		}
+		uploader.IPCaptureEvent = ipCaptures
+	}
+	if user != nil {
+		if uploader == nil {
+			uploader = &ncmecReportedPerson{}
+		}
+		uploader.UserReported = ncmecPerson{Email: uploads[0].User.Email}
+		if user.StripeID != "" {
+			uploader.AdditionalInfo = "Credit Card Info on file."
+		}
+	}
+
+	// create the report
+	report := report{
+		IncidentSummary: ncmecIncidentSummary{
+			IncidentType:     "Child Pornography (possession, manufacture, and distribution)",
+			IncidentDateTime: date.Format(time.RFC3339),
+		},
+		InternetDetails: ncmecInternetDetails{
+			ncmecWebPageIncident{
+				ThirdPartyHostedContent: true,
+				Url:                     urls,
+			},
+		},
+		Reporter: r.staticReporter,
+	}
+	if uploader != nil {
+		report.Uploader = *uploader
+	}
+
+	return report
+}
+
+// fileReports fetches all reports from the database that have not been
+// successfully reported yet to NCMEC.
+func (r *Reporter) fileReports() {
+	// convenience variables
+	abuseDB := r.staticAbuseDatabase
+	logger := r.staticLogger
+
+	// fetch all unfiled reports
+	unfiled, err := abuseDB.FindUnfiledReports()
+	if err != nil {
+		logger.Errorf("Failed fetching unreported emails, error %v", err)
+		return
+	}
+
+	// log unreported message count
+	numUnfiled := len(unfiled)
+	if numUnfiled == 0 {
+		logger.Debugf("Found %v unfiled NCMEC reports", numUnfiled)
+		return
+	}
+
+	logger.Infof("Found %v unfiled NCMEC reports", numUnfiled)
+
+	// loop over all unfiled reports and file them with NCMEC
+	for _, report := range unfiled {
+		r.fileReport(report)
+	}
+}
+
+// fileReport will open the report with NCMEC and immediately finish it
+func (r *Reporter) fileReport(report database.NCMECReport) error {
+	// convenience variables
+	logger := r.staticLogger
+	abuseDB := r.staticAbuseDatabase
+
+	// acquire a lock on the report
+	lock := abuseDB.NewReportLock(report.ID.Hex())
+	err := lock.Lock()
+	if err != nil {
+		return errors.AddContext(err, "could not acquire lock")
+	}
+
+	// defer the unlock
+	defer func() {
+		unlockErr := lock.Unlock()
+		if unlockErr != nil {
+			err = errors.Compose(err, errors.AddContext(unlockErr, "could not release lock"))
+			return
+		}
+	}()
+
+	// under lock, check whether the report has not been filed yet by another
+	// process, if so we simply return
+	current, err := abuseDB.FindReport(report.ID)
+	if err != nil {
+		return errors.AddContext(err, "could not find report")
+	}
+	if current.Filed {
+		return nil
+	}
+
+	// if the report has an NCMEC report id, it means something went wrong when
+	// trying to finish the report last time, so we try again.
+	if report.ReportID != 0 {
+		return r.finishReport(report)
+	}
+
+	// otherwise open a report with NCMEC
+	reportId, err := r.openReport(report)
+	if err != nil {
+		logger.Errorf("failed to open report, error '%v'", err)
+	}
+
+	// only if the report id is 0 we want to escape, if it is not 0 it means
+	// a report has been opened but something went wrong after opening the
+	// report, in that case we want to try and continue to finish the report
+	if reportId == 0 {
+		return err
+	}
+
+	// set the report id and finish the report
+	report.ReportID = reportId
+	err = r.finishReport(report)
+	if err != nil {
+		logger.Errorf("failed to finish report, error '%v'", err)
+		return err
+	}
+
+	return nil
+}
+
+// finishReport will finish the report with NCMEC
+func (r *Reporter) finishReport(report database.NCMECReport) error {
+	// convenience variables
+	logger := r.staticLogger
+
+	// finish the report with NCMEC
+	var reportErr string
+	res, err := r.staticClient.finishReport(report.ReportID)
+	if err == nil && res.ResponseCode != ncmecStatusOK {
+		err = fmt.Errorf("unexpected response code %v when finishing report '%v'", res.ResponseCode, report.ID.Hex())
+	}
+	if err != nil {
+		reportErr = err.Error()
+		logger.Errorf("failed to finish report %v, err '%v'", report.ReportID, err)
+	}
+
+	// update the email and set the report err and reported flag
+	err = r.staticAbuseDatabase.UpdateReportNoLock(report, bson.M{
+		"$set": bson.M{
+			"filed":     err == nil,
+			"filed_at":  time.Now().UTC(),
+			"filed_err": reportErr,
+
+			"report_id": report.ReportID,
+		},
+	})
+	if err != nil {
+		logger.Errorf("failed to update report %v, err '%v'", report.ID, err)
+		return err
+	}
+	return nil
+}
+
+// openReport will open a report with NCMEC for the given email, it will
+// decorate the abuse email with the report id
+func (r *Reporter) openReport(entity database.NCMECReport) (uint64, error) {
+	// convenience variables
+	logger := r.staticLogger
+
+	// unmarshal the report
+	var report report
+	err := xml.Unmarshal([]byte(entity.Report), &report)
+	if err != nil {
+		return 0, fmt.Errorf("faild to unmarshal report, err %v", err)
+	}
+
+	// ensure the attributes are set
+	report.Xsi = "http://www.w3.org/2001/XMLSchema-instance"
+	report.NoNamespaceSchemaLocation = "https://report.cybertip.org/ispws/xsd"
+
+	// open the report
+	reportedAt := time.Now().UTC()
+	resp, err := r.staticClient.openReport(report)
+	if err == nil && resp.ResponseCode != ncmecStatusOK {
+		err = fmt.Errorf("unexpected response code %v when opening report '%v'", resp.ResponseCode, entity.ID.Hex())
+	}
+	if err != nil {
+		// update the email and set the report err
+		err = errors.Compose(err, r.staticAbuseDatabase.UpdateReportNoLock(entity, bson.M{
+			"$set": bson.M{
+				"filed_err": err.Error(),
+			},
+		}))
+		logger.Errorf("failed to open report, err '%v'", err)
+		return 0, err
+	}
+	reportId := resp.ReportId
+
+	// update the email and set the report id
+	err = r.staticAbuseDatabase.UpdateReportNoLock(entity, bson.M{
+		"$set": bson.M{
+			"filed_at":  reportedAt,
+			"report_id": reportId,
+		},
+	})
+	if err != nil {
+		logger.Errorf("failed to update report '%v', err '%v'", entity.ID.Hex(), err)
+		return reportId, nil
+	}
+
+	return reportId, nil
+}
+
+// threadedBuildReports will periodically fetch messages that have been tagged
+// as csam and have not been converted into NCMEC reports yet.
+func (r *Reporter) threadedBuildReports() {
 	// convenience variables
 	logger := r.staticLogger
 
@@ -271,8 +476,45 @@ func (r *Reporter) threadedReportMessages() {
 
 	// start the loop
 	for {
-		logger.Debugln("threadedReportMessages loop iteration triggered")
-		r.reportMessages()
+		logger.Debugln("threadedBuildReports loop iteration triggered")
+		r.buildReports()
+
+		select {
+		case <-r.staticStopChan:
+			logger.Debugln("Reporter stop channel closed")
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// threadedFileReports will periodically fetch reports that have not been
+// successfully reported to NCMEC yet.
+func (r *Reporter) threadedFileReports() {
+	// convenience variables
+	logger := r.staticLogger
+
+	// create a new ticker
+	ticker := time.NewTicker(ncmecFileFrequency)
+
+	// start the loop
+	for {
+		func() {
+			logger.Debugln("threadedFileReports loop iteration triggered")
+
+			// check the status endpoint before filing reports
+			res, err := r.staticClient.status()
+			if err != nil {
+				logger.Errorf("unexpected response from NCMEC API, err %v, skipping filing reports", err)
+				return
+			}
+			if res.ResponseCode != ncmecStatusOK {
+				logger.Errorf("unexpected status response from NCMEC API, status %v, skipping filing reports", res.ResponseCode)
+				return
+			}
+
+			r.fileReports()
+		}()
 
 		select {
 		case <-r.staticStopChan:

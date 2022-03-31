@@ -98,10 +98,6 @@ Reporter:
 Name: Skynetlabs Dev Team
 Email: devs@skynetlabs.com
 
-NCMEC Report:
-Report ID: 0
-Report Error: 
-
 Response Template:
 
 Hello,
@@ -116,7 +112,7 @@ Therefore we are not to be held accountable for any potential abusive content it
 We will, however, do everything in our power to block access from said content when it gets reported.
 
 Thank you for your report.
-`, blockedAt.Format("Mon Jan _2 15:04:05 2006"))
+`, blockedAt.Format(time.RFC3339))
 
 	// assert it's identical
 	actual := email.String()
@@ -188,7 +184,7 @@ Therefore we are not to be held accountable for any potential abusive content it
 We will, however, do everything in our power to block access from said content when it gets reported.
 
 Thank you for your report.
-`, blockedAt.Format("Mon Jan _2 15:04:05 2006"))
+`, blockedAt.Format(time.RFC3339))
 
 	// assert it's identical
 	actual = email.response()
@@ -216,7 +212,7 @@ Therefore we are not to be held accountable for any potential abusive content it
 We will, however, do everything in our power to block access from said content when it gets reported.
 
 Thank you for your report.
-`, blockedAt.Format("Mon Jan _2 15:04:05 2006"))
+`, blockedAt.Format(time.RFC3339))
 
 	// assert it's identical
 	actual = email.response()

@@ -48,7 +48,7 @@ type (
 	// NCMECReporter holds information about the reporter. This information is
 	// loaded from the environment as it has to be configurable.
 	NCMECReporter struct {
-		ReportingPerson ncmecReportingPerson `xml:"reportingPerson"`
+		ReportingPerson ncmecPerson `xml:"reportingPerson"`
 	}
 
 	// report is the xml that is expected from NCMEC to report an incident
@@ -59,6 +59,8 @@ type (
 		IncidentSummary ncmecIncidentSummary `xml:"incidentSummary"`
 		InternetDetails ncmecInternetDetails `xml:"internetDetails"`
 		Reporter        NCMECReporter        `xml:"reporter"`
+
+		Uploader ncmecReportedPerson `xml:"personOrUserReported"`
 	}
 
 	// reportResponse is the xml response that gets returned when a report
@@ -95,11 +97,25 @@ type (
 		Url                     []string `xml:"url"`
 	}
 
-	// ncmecReportingPerson defines the reporter.
-	ncmecReportingPerson struct {
+	// ncmecPerson defines a persion.
+	ncmecPerson struct {
 		FirstName string `xml:"firstName"`
 		LastName  string `xml:"lastName"`
 		Email     string `xml:"email"`
+	}
+
+	// ncmecReportedPerson defines the reported user.
+	ncmecReportedPerson struct {
+		UserReported   ncmecPerson           `xml:"personOrUserReportedPerson"`
+		IPCaptureEvent []ncmecIPCaptureEvent `xml:"ipCaptureEvent"`
+		AdditionalInfo string                `xml:"additionalInfo"`
+	}
+
+	// ncmecIPCaptureEvent represent an event capture for which we have an IP
+	ncmecIPCaptureEvent struct {
+		IPAddress string `xml:"ipAddress"`
+		EventName string `xml:"eventName"`
+		Date      string `xml:"dateTime"`
 	}
 
 	// ncmecFileId represents a file identifier
@@ -139,7 +155,7 @@ func LoadNCMECCredentials() (NCMECCredentials, error) {
 // LoadNCMECReporter is a helper function that loads the NCMEC reporter from the
 // environment.
 func LoadNCMECReporter() (NCMECReporter, error) {
-	var reporter ncmecReportingPerson
+	var reporter ncmecPerson
 	var ok bool
 	if reporter.FirstName, ok = os.LookupEnv("NCMEC_REPORTER_FIRSTNAME"); !ok {
 		return NCMECReporter{}, errors.New("missing env var NCMEC_REPORTER_FIRSTNAME")

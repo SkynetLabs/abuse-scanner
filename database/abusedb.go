@@ -1,6 +1,7 @@
 package database
 
 import (
+	"abuse-scanner/test"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -26,21 +27,16 @@ const (
 	// collLocks is the name of the collection that contains locks
 	collLocks = "locks"
 
+	// collNCMECReports is the name of the collection that contains all NCMEC
+	// reports.
+	collNCMECReports = "ncmec_reports"
+
 	// lockOwnerName is passed as the 'Owner' when creating a new lock in
 	// the db for tus uploads.
 	lockOwnerName = "Abuse Scanner"
 
 	// lockTTL is the time-to-live in seconds for a lock
 	lockTTL = 300 // 5 minutes
-
-	// mongoTestUsername is the username used to connect with the test DB.
-	mongoTestUsername = "admin"
-
-	// mongoTestPassword is the password used to connect with the test DB.
-	mongoTestPassword = "aO4tV5tC1oU3oQ7u"
-
-	// mongoTestConnString is the connection string to connect with the test DB.
-	mongoTestConnString = "mongodb://localhost:37017"
 )
 
 var (
@@ -66,16 +62,17 @@ type (
 		staticPortalHostName string
 	}
 
-	// abuseEmailLock represents a lock on an abuse email.
-	abuseEmailLock struct {
+	// abuseLock represents a lock on an entity in the abuse database.
+	abuseLock struct {
 		staticClient         *lock.Client
-		staticEmailUID       string
+		staticLockID         string
 		staticPortalHostname string
+		staticResourceName   string
 	}
 )
 
 // NewAbuseScannerDB returns an instance of the Mongo DB.
-func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri, mongoDbName string, mongoCreds options.Credential, logger *logrus.Logger) (*AbuseScannerDB, error) {
+func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoDbName, mongoUri string, mongoCreds options.Credential, logger *logrus.Logger) (*AbuseScannerDB, error) {
 	// create the client
 	opts := options.Client().ApplyURI(mongoUri).SetAuth(mongoCreds)
 	client, err := mongo.NewClient(opts)
@@ -112,7 +109,7 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri, mongoDbNam
 			staticClient:   client,
 			staticDatabase: database,
 			staticLogger:   logger,
-			staticName:     mongoDbName,
+			staticName:     DBAbuseScanner,
 		},
 		*lock.NewClient(database.Collection(collLocks)),
 		portalHostName,
@@ -148,6 +145,19 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri, mongoDbNam
 				Options: options.Index(),
 			},
 		},
+		collNCMECReports: {
+			{
+				Keys: bson.D{
+					{Key: "email_id", Value: 1},
+					{Key: "user_id", Value: 1},
+				},
+				Options: options.Index().SetUnique(true),
+			},
+			{
+				Keys:    bson.M{"filed": 1},
+				Options: options.Index(),
+			},
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -156,19 +166,33 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoUri, mongoDbNam
 	return db, nil
 }
 
-// NewTestDatabase returns a new test database.
-func NewTestDatabase(ctx context.Context, dbName string, logger *logrus.Logger) (*AbuseScannerDB, error) {
+// NewTestAbuseScannerDB returns a new test database.
+//
+// NOTE: the database is purged before it gets returned.
+func NewTestAbuseScannerDB(ctx context.Context, dbName string, logger *logrus.Logger) (*AbuseScannerDB, error) {
 	// create a nil logger if none is passed
 	if logger == nil {
 		logger = logrus.New()
 		logger.Out = ioutil.Discard
 	}
 
+	// create the database
 	dbName = strings.Replace(dbName, "/", "_", -1)
-	return NewAbuseScannerDB(ctx, "", mongoTestConnString, dbName, options.Credential{
-		Username: mongoTestUsername,
-		Password: mongoTestPassword,
+	db, err := NewAbuseScannerDB(ctx, "", dbName, test.MongoDBConnString, options.Credential{
+		Username: test.MongoDBUsername,
+		Password: test.MongoDBPassword,
 	}, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// purge the database
+	err = db.Purge(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
 }
 
 // Close will disconnect from the database
@@ -216,28 +240,13 @@ func (db *AbuseScannerDB) FindUnblocked() ([]AbuseEmail, error) {
 // FindUnfinalized returns the messages that have not been finalized.
 func (db *AbuseScannerDB) FindUnfinalized(mailbox string) ([]AbuseEmail, error) {
 	emails, err := db.findGeneric(bson.M{
-		"$and": []bson.M{
-			{
-				"email_uid": bson.M{"$regex": primitive.Regex{
-					Pattern: fmt.Sprintf("^%v-", mailbox),
-				}},
-				"parsed":    true,
-				"blocked":   true,
-				"finalized": false,
-			},
-			// unfinalized emails are either:
-			// - emails without csam that have not been finalized
-			// - emails with csm that have been reported but not yet finalized
-			{"$or": []bson.M{
-				{
-					"parse_result.tags": bson.M{"$nin": []string{"csam"}},
-				},
-				{
-					"parse_result.tags": "csam",
-					"reported":          true,
-				},
-			}},
-		},
+		"email_uid": bson.M{"$regex": primitive.Regex{
+			Pattern: fmt.Sprintf("^%v-", mailbox),
+		}},
+
+		"parsed":    true,
+		"blocked":   true,
+		"finalized": false,
 	})
 	if err != nil {
 		return nil, errors.AddContext(err, "failed to find unfinalized emails")
@@ -262,10 +271,9 @@ func (db *AbuseScannerDB) FindUnparsed() ([]AbuseEmail, error) {
 // been reported to NCMEC.
 func (db *AbuseScannerDB) FindUnreported() ([]AbuseEmail, error) {
 	emails, err := db.findGeneric(bson.M{
-		"parsed":            true,
-		"blocked":           true,
-		"reported":          false,
-		"finalized":         false,
+		"parsed":   true,
+		"reported": false,
+
 		"parse_result.tags": "csam",
 	})
 	if err != nil {
@@ -278,11 +286,13 @@ func (db *AbuseScannerDB) FindUnreported() ([]AbuseEmail, error) {
 func (db *AbuseScannerDB) Purge(ctx context.Context) error {
 	collEmails := db.staticDatabase.Collection(collEmails)
 	collLocks := db.staticDatabase.Collection(collLocks)
+	collReports := db.staticDatabase.Collection(collNCMECReports)
 
 	_, purgeEmailsErr := collEmails.DeleteMany(ctx, bson.M{})
 	_, purgeLocksErr := collLocks.DeleteMany(ctx, bson.M{})
+	_, purgeReportsErr := collReports.DeleteMany(ctx, bson.M{})
 
-	return errors.Compose(purgeEmailsErr, purgeLocksErr)
+	return errors.Compose(purgeEmailsErr, purgeLocksErr, purgeReportsErr)
 }
 
 // findGeneric is a function that retrieves emails based on the given filter.
@@ -361,12 +371,18 @@ func (db *AbuseScannerDB) Exists(uid string) (exists bool, err error) {
 	return exists, nil
 }
 
-// NewLock returns a new abuse email lock for an email with given uid.
-func (db *AbuseScannerDB) NewLock(emailUID string) *abuseEmailLock {
-	return &abuseEmailLock{
+// NewLock returns a new abuse lock for an email with given id.
+func (db *AbuseScannerDB) NewLock(lockID string) *abuseLock {
+	return db.newLockCustom("emails", lockID)
+}
+
+// newLockCustom returns a new abuse lock for a resource with given id
+func (db *AbuseScannerDB) newLockCustom(resourceName, lockID string) *abuseLock {
+	return &abuseLock{
 		staticClient:         &db.Client,
-		staticEmailUID:       emailUID,
+		staticLockID:         lockID,
 		staticPortalHostname: db.staticPortalHostName,
+		staticResourceName:   resourceName,
 	}
 }
 
@@ -390,7 +406,7 @@ func (db *AbuseScannerDB) UpdateNoLock(email AbuseEmail, update interface{}) (er
 // email is already locked and it will put an expiration time on the lock in
 // case the server dies while the file is locked. That way emails won't remain
 // locked forever.
-func (l *abuseEmailLock) Lock() error {
+func (l *abuseLock) Lock() error {
 	client := l.staticClient
 	ld := lock.LockDetails{
 		Owner: lockOwnerName,
@@ -401,18 +417,18 @@ func (l *abuseEmailLock) Lock() error {
 	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
 	defer cancel()
 
-	return client.XLock(ctx, l.staticEmailUID, l.staticEmailUID, ld)
+	return client.XLock(ctx, "emails", l.staticLockID, ld)
 }
 
 // Unlock attempts to unlock an email. It will retry doing so for a certain
 // time before giving up.
-func (l *abuseEmailLock) Unlock() error {
+func (l *abuseLock) Unlock() error {
 	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
 	defer cancel()
 
 	var err error
 	for {
-		_, err = l.staticClient.Unlock(ctx, l.staticEmailUID)
+		_, err = l.staticClient.Unlock(ctx, l.staticLockID)
 		if err == nil {
 			return nil
 		}

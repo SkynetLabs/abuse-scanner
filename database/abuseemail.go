@@ -67,10 +67,6 @@ type (
 		// fields set by reporter
 		Reported   bool      `bson:"reported"`
 		ReportedAt time.Time `bson:"reported_at"`
-
-		// NCMEC report specific fields
-		NCMECReportId  uint64 `bson:"ncmec_report_id"`
-		NCMECReportErr string `bson:"ncmec_report_err"`
 	}
 
 	// AbuseReport contains all information about an abuse report.
@@ -117,7 +113,7 @@ Please verify the link is not corrupted as we need it in order to prevent access
 	sb.WriteString("Hello,\n\n")
 
 	if len(blocked) > 0 {
-		sb.WriteString(fmt.Sprintf("the following links were identified and blocked on all of our servers as of %v\n\n", a.BlockedAt.Format("Mon Jan _2 15:04:05 2006")))
+		sb.WriteString(fmt.Sprintf("the following links were identified and blocked on all of our servers as of %v\n\n", a.BlockedAt.Format(time.RFC3339)))
 		for _, skylink := range blocked {
 			sb.WriteString(fmt.Sprintf("- %s\n", skylink))
 		}
@@ -182,13 +178,6 @@ func (a AbuseEmail) String() string {
 	sb.WriteString("\nReporter:\n")
 	sb.WriteString(fmt.Sprintf("Name: %v\n", pr.Reporter.Name))
 	sb.WriteString(fmt.Sprintf("Email: %v\n", pr.Reporter.Email))
-
-	// if the abuse email has CSAM we report on the NCMEC reporting
-	if a.ParseResult.HasTag("csam") {
-		sb.WriteString("\nNCMEC Report:\n")
-		sb.WriteString(fmt.Sprintf("Report ID: %v\n", a.NCMECReportId))
-		sb.WriteString(fmt.Sprintf("Report Error: %v\n", a.NCMECReportErr))
-	}
 
 	// write response template
 	sb.WriteString("\nResponse Template:\n\n")
