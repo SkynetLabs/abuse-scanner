@@ -27,10 +27,6 @@ const (
 	// collLocks is the name of the collection that contains locks
 	collLocks = "locks"
 
-	// collNCMECReports is the name of the collection that contains all NCMEC
-	// reports.
-	collNCMECReports = "ncmec_reports"
-
 	// lockOwnerName is passed as the 'Owner' when creating a new lock in
 	// the db for tus uploads.
 	lockOwnerName = "Abuse Scanner"
@@ -142,19 +138,6 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoDbName, mongoUr
 			},
 			{
 				Keys:    bson.M{"reported": 1},
-				Options: options.Index(),
-			},
-		},
-		collNCMECReports: {
-			{
-				Keys: bson.D{
-					{Key: "email_id", Value: 1},
-					{Key: "user_id", Value: 1},
-				},
-				Options: options.Index().SetUnique(true),
-			},
-			{
-				Keys:    bson.M{"filed": 1},
 				Options: options.Index(),
 			},
 		},
@@ -286,13 +269,11 @@ func (db *AbuseScannerDB) FindUnreported() ([]AbuseEmail, error) {
 func (db *AbuseScannerDB) Purge(ctx context.Context) error {
 	collEmails := db.staticDatabase.Collection(collEmails)
 	collLocks := db.staticDatabase.Collection(collLocks)
-	collReports := db.staticDatabase.Collection(collNCMECReports)
 
 	_, purgeEmailsErr := collEmails.DeleteMany(ctx, bson.M{})
 	_, purgeLocksErr := collLocks.DeleteMany(ctx, bson.M{})
-	_, purgeReportsErr := collReports.DeleteMany(ctx, bson.M{})
 
-	return errors.Compose(purgeEmailsErr, purgeLocksErr, purgeReportsErr)
+	return errors.Compose(purgeEmailsErr, purgeLocksErr)
 }
 
 // findGeneric is a function that retrieves emails based on the given filter.
