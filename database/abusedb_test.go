@@ -33,7 +33,7 @@ func TestAbuseScannerDB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
 	defer cancel()
 
-	db, err := NewTestAbuseScannerDB(ctx, t.Name(), nil)
+	db, err := NewTestAbuseScannerDB(ctx, t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
