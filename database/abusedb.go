@@ -33,6 +33,9 @@ const (
 
 	// lockTTL is the time-to-live in seconds for a lock
 	lockTTL = 300 // 5 minutes
+
+	// resourceEmails is the resource name used when locking mails
+	resourceEmails = "emails"
 )
 
 var (
@@ -105,7 +108,7 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoDbName, mongoUr
 			staticClient:   client,
 			staticDatabase: database,
 			staticLogger:   logger,
-			staticName:     DBAbuseScanner,
+			staticName:     mongoDbName,
 		},
 		*lock.NewClient(database.Collection(collLocks)),
 		portalHostName,
@@ -152,12 +155,10 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoDbName, mongoUr
 // NewTestAbuseScannerDB returns a new test database.
 //
 // NOTE: the database is purged before it gets returned.
-func NewTestAbuseScannerDB(ctx context.Context, dbName string, logger *logrus.Logger) (*AbuseScannerDB, error) {
-	// create a nil logger if none is passed
-	if logger == nil {
-		logger = logrus.New()
-		logger.Out = ioutil.Discard
-	}
+func NewTestAbuseScannerDB(ctx context.Context, dbName string) (*AbuseScannerDB, error) {
+	// create a nil logger
+	logger := logrus.New()
+	logger.Out = ioutil.Discard
 
 	// create the database
 	dbName = strings.Replace(dbName, "/", "_", -1)
@@ -209,7 +210,7 @@ func (db *AbuseScannerDB) FindOne(emailUid string) (*AbuseEmail, error) {
 
 // FindUnblocked returns the messages that have not been blocked.
 func (db *AbuseScannerDB) FindUnblocked() ([]AbuseEmail, error) {
-	emails, err := db.findGeneric(bson.M{
+	emails, err := db.find(bson.M{
 		"parsed":    true,
 		"blocked":   false,
 		"finalized": false,
@@ -222,7 +223,7 @@ func (db *AbuseScannerDB) FindUnblocked() ([]AbuseEmail, error) {
 
 // FindUnfinalized returns the messages that have not been finalized.
 func (db *AbuseScannerDB) FindUnfinalized(mailbox string) ([]AbuseEmail, error) {
-	emails, err := db.findGeneric(bson.M{
+	emails, err := db.find(bson.M{
 		"email_uid": bson.M{"$regex": primitive.Regex{
 			Pattern: fmt.Sprintf("^%v-", mailbox),
 		}},
@@ -239,7 +240,7 @@ func (db *AbuseScannerDB) FindUnfinalized(mailbox string) ([]AbuseEmail, error) 
 
 // FindUnparsed returns the messages that have not been parsed.
 func (db *AbuseScannerDB) FindUnparsed() ([]AbuseEmail, error) {
-	emails, err := db.findGeneric(bson.M{
+	emails, err := db.find(bson.M{
 		"parsed":    false,
 		"blocked":   false,
 		"finalized": false,
@@ -253,7 +254,7 @@ func (db *AbuseScannerDB) FindUnparsed() ([]AbuseEmail, error) {
 // FindUnreported returns the messages that have the 'csam' tag but have not
 // been reported to NCMEC.
 func (db *AbuseScannerDB) FindUnreported() ([]AbuseEmail, error) {
-	emails, err := db.findGeneric(bson.M{
+	emails, err := db.find(bson.M{
 		"parsed":   true,
 		"reported": false,
 
@@ -276,10 +277,10 @@ func (db *AbuseScannerDB) Purge(ctx context.Context) error {
 	return errors.Compose(purgeEmailsErr, purgeLocksErr)
 }
 
-// findGeneric is a function that retrieves emails based on the given filter.
-// It's a generic function that's re-used by the more verbose find methods which
-// are exposed on the database.
-func (db *AbuseScannerDB) findGeneric(filter interface{}) ([]AbuseEmail, error) {
+// find is a function that retrieves emails based on the given filter. It's a
+// generic function that's re-used by the more verbose find methods which are
+// exposed on the database.
+func (db *AbuseScannerDB) find(filter interface{}) ([]AbuseEmail, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), mongoDefaultTimeout)
 	defer cancel()
 
@@ -354,7 +355,7 @@ func (db *AbuseScannerDB) Exists(uid string) (exists bool, err error) {
 
 // NewLock returns a new abuse lock for an email with given id.
 func (db *AbuseScannerDB) NewLock(lockID string) *abuseLock {
-	return db.newLockCustom("emails", lockID)
+	return db.newLockCustom(resourceEmails, lockID)
 }
 
 // newLockCustom returns a new abuse lock for a resource with given id
