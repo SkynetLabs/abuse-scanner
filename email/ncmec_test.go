@@ -13,7 +13,6 @@ func TestNCMECClient(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
-	t.Parallel()
 
 	os.Setenv("NCMEC_USERNAME", "")
 	os.Setenv("NCMEC_PASSWORD", "")
@@ -58,10 +57,16 @@ func TestNCMECClient(t *testing.T) {
 
 // testFinishReport is a unit test that verifies whether we can finish a report
 func testFinishReport(t *testing.T, c *NCMECClient) {
+	// quickly assert NCMEC is up
+	res, err := c.status()
+	if err != nil || res.ResponseCode != ncmecStatusOK {
+		t.Fatal("NCMEC down")
+	}
+
 	// open a report
 	now := time.Now().UTC().Add(-time.Hour)
 	report := newTestReport(now)
-	res, err := c.openReport(report)
+	res, err = c.openReport(report)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,10 +88,16 @@ func testFinishReport(t *testing.T, c *NCMECClient) {
 
 // testOpenReport is a unit test that verifies we can open a report with NCMEC
 func testOpenReport(t *testing.T, c *NCMECClient) {
+	// quickly assert NCMEC is up
+	res, err := c.status()
+	if err != nil || res.ResponseCode != ncmecStatusOK {
+		t.Fatal("NCMEC down")
+	}
+
 	// open a report
 	now := time.Now().UTC().Add(time.Hour)
 	report := newTestReport(now)
-	res, err := c.openReport(report)
+	res, err = c.openReport(report)
 	if err != nil {
 		t.Fatal(err)
 	}
