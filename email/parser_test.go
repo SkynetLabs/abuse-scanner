@@ -226,7 +226,7 @@ func testBuildAbuseReport(t *testing.T) {
 	logger.Out = ioutil.Discard
 
 	// create test database
-	db, err := database.NewTestAbuseScannerDB(ctx, "testBuildAbuseReport", logger)
+	db, err := database.NewTestAbuseScannerDB(ctx, "testBuildAbuseReport")
 	if err != nil {
 		t.Fatal(err)
 	}

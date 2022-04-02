@@ -10,12 +10,17 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+const (
+	// resourceReports is the resource name used when locking reports
+	resourceReports = "ncmec_reports"
+)
+
 type (
 	// NCMECReport is a database entity that represents an NCMEC report.
 	NCMECReport struct {
 		ID      primitive.ObjectID `bson:"_id"`
 		EmailID primitive.ObjectID `bson:"email_id"`
-		UserID  primitive.ObjectID `bson:"user_id"`
+		UserID  string             `bson:"user_id"`
 
 		Filed    bool      `bson:"filed"`
 		FiledAt  time.Time `bson:"filed_at"`
@@ -37,7 +42,7 @@ type (
 
 // NewReportLock returns a lock on a report entity
 func (db *AbuseScannerDB) NewReportLock(reportID string) *abuseLock {
-	return db.newLockCustom("ncmec_reports", reportID)
+	return db.newLockCustom(resourceReports, reportID)
 }
 
 // InsertReport will try and insert the given report into the database.

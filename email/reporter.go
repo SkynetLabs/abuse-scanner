@@ -1,6 +1,7 @@
 package email
 
 import (
+	"abuse-scanner/accounts"
 	"abuse-scanner/database"
 	"encoding/xml"
 	"fmt"
@@ -44,25 +45,25 @@ type (
 	// abuse reports that have not been reported to NCMEC yet.
 	Reporter struct {
 		staticAbuseDatabase  *database.AbuseScannerDB
+		staticAccountsClient *accounts.AccountsClient
 		staticClient         *NCMECClient
 		staticLogger         *logrus.Entry
 		staticPortalURL      string
 		staticReporter       NCMECReporter
-		staticSkynetDatabase *database.SkynetDB
 		staticStopChan       chan struct{}
 		staticWaitGroup      sync.WaitGroup
 	}
 )
 
 // NewReporter creates a new reporter.
-func NewReporter(abuseDB *database.AbuseScannerDB, skynetDB *database.SkynetDB, creds NCMECCredentials, portalURL string, reporter NCMECReporter, logger *logrus.Logger) *Reporter {
+func NewReporter(abuseDB *database.AbuseScannerDB, accountsClient *accounts.AccountsClient, creds NCMECCredentials, portalURL string, reporter NCMECReporter, logger *logrus.Logger) *Reporter {
 	return &Reporter{
 		staticAbuseDatabase:  abuseDB,
+		staticAccountsClient: accountsClient,
 		staticClient:         NewNCMECClient(creds),
 		staticLogger:         logger.WithField("module", "Reporter"),
 		staticPortalURL:      portalURL,
 		staticReporter:       reporter,
-		staticSkynetDatabase: skynetDB,
 		staticStopChan:       make(chan struct{}),
 	}
 }
@@ -150,7 +151,7 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 	// convenience variables
 	logger := r.staticLogger
 	abuseDB := r.staticAbuseDatabase
-	skynetDB := r.staticSkynetDatabase
+	accountsClient := r.staticAccountsClient
 
 	// acquire a lock on the email
 	lock := abuseDB.NewLock(email.UID)
@@ -181,15 +182,19 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 	// find the uploads corresponding to the abusive skylinks, we group them by
 	// uploader because an NCMEC report should be unique to the person uploading
 	// the abusive content
-	skylinks := email.ParseResult.Skylinks
-	uploadsPerUser, err := skynetDB.FindUploadsPerUser(skylinks)
-	if err != nil {
-		return errors.AddContext(err, "could not find uploads")
+	uploadsPerUser := make(map[string][]*accounts.UploadInfo)
+	for _, skylink := range email.ParseResult.Skylinks {
+		info, err := accountsClient.UploadInfoGET(skylink)
+		if err != nil {
+			logger.Errorf("failed to fetch upload info, err %v", err)
+			return err
+		}
+		uploadsPerUser[info.UserSub] = append(uploadsPerUser[info.UserSub], info)
 	}
 
 	// build the report for every uploaders and set of skylinks, and insert it
 	// into the database, another process will file the report with NCMEC
-	for _, uploads := range uploadsPerUser {
+	for user, uploads := range uploadsPerUser {
 		report := r.buildReportForUploads(email.InsertedAt, uploads)
 		reportBytes, err := xml.Marshal(&report)
 		if err != nil {
@@ -202,7 +207,7 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 			database.NCMECReport{
 				ID:         primitive.NewObjectID(),
 				EmailID:    email.ID,
-				UserID:     uploads[0].SkynetUpload.UserID,
+				UserID:     user,
 				Report:     string(reportBytes),
 				InsertedAt: time.Now().UTC(),
 			},
@@ -228,10 +233,9 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 
 // buildReportForUploads takes an email and a set of uploads and returns an
 // NCMEC report
-func (r *Reporter) buildReportForUploads(date time.Time, uploads []*database.SkynetUploadHydrated) report {
+func (r *Reporter) buildReportForUploads(date time.Time, user string, uploads []*accounts.UploadInfo) report {
 	// convenience variables
 	portalURL := r.staticPortalURL
-	user := uploads[0].User // this is safe
 
 	// construct the urls
 	var urls []string
