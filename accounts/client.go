@@ -7,8 +7,10 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"time"
 
 	"gitlab.com/NebulousLabs/errors"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.sia.tech/siad/node/api"
 )
 
@@ -19,8 +21,21 @@ type (
 		staticAccountsURL string
 	}
 
-	// UploadInfo TODO: replace
-	UploadInfo struct{}
+	// UploadInfo TODO: replace with accounts struct
+	UploadInfo struct {
+		Skylink   string
+		IP        string
+		CreatedAt time.Time
+		UploaderInfo
+	}
+
+	// UploaderInfo TODO: replace with accounts struct
+	UploaderInfo struct {
+		UserID   primitive.ObjectID
+		Email    string
+		Sub      string
+		StripeID string
+	}
 )
 
 // NewAccountsClient returns a new accounts client
@@ -31,15 +46,15 @@ func NewAccountsClient(host, port string) *AccountsClient {
 }
 
 // UploadInfoGET calls the `/uploadinfo/:skylink` endpoint with given parameters
-func (c *AccountsClient) UploadInfoGET(skylink string) (*UploadInfo, error) {
+func (c *AccountsClient) UploadInfoGET(skylink string) ([]UploadInfo, error) {
 	// execute the get request
-	var info UploadInfo
+	var info []UploadInfo
 	err := c.get(fmt.Sprintf("/uploadinfo/%s", skylink), url.Values{}, &info)
 	if err != nil {
 		return nil, errors.AddContext(err, fmt.Sprintf("failed to fetch upload info for skylink %s, err %v", skylink, err))
 	}
 
-	return &info, nil
+	return info, nil
 }
 
 // get is a helper function that executes a GET request on the given endpoint
