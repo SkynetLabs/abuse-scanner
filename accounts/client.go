@@ -46,15 +46,15 @@ func NewAccountsClient(host, port string) *AccountsClient {
 }
 
 // UploadInfoGET calls the `/uploadinfo/:skylink` endpoint with given parameters
-func (c *AccountsClient) UploadInfoGET(skylink string) (*UploadInfo, error) {
+func (c *AccountsClient) UploadInfoGET(skylink string) ([]UploadInfo, error) {
 	// execute the get request
-	var info UploadInfo
+	var info []UploadInfo
 	err := c.get(fmt.Sprintf("/uploadinfo/%s", skylink), url.Values{}, &info)
 	if err != nil {
 		return nil, errors.AddContext(err, fmt.Sprintf("failed to fetch upload info for skylink %s, err %v", skylink, err))
 	}
 
-	return &info, nil
+	return info, nil
 }
 
 // get is a helper function that executes a GET request on the given endpoint
