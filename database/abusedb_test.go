@@ -45,27 +45,29 @@ func TestAbuseScannerDB(t *testing.T) {
 
 	tests := []struct {
 		name string
-		test func(t *testing.T)
+		test func(ctx context.Context, t *testing.T, db *AbuseScannerDB)
 	}{
 		{
 			name: "FindUnblocked",
-			test: func(t *testing.T) { testFindUnblocked(ctx, t, db) },
+			test: testFindUnblocked,
 		},
 		{
 			name: "FindUnfinalized",
-			test: func(t *testing.T) { testFindUnfinalized(ctx, t, db) },
+			test: testFindUnfinalized,
 		},
 		{
 			name: "FindUnparsed",
-			test: func(t *testing.T) { testFindUnparsed(ctx, t, db) },
+			test: testFindUnparsed,
 		},
 		{
 			name: "FindUnreported",
-			test: func(t *testing.T) { testFindUnreported(ctx, t, db) },
+			test: testFindUnreported,
 		},
 	}
 	for _, test := range tests {
-		t.Run(test.name, test.test)
+		t.Run(test.name, func(t *testing.T) {
+			test.test(ctx, t, db)
+		})
 	}
 }
 
@@ -102,9 +104,9 @@ func testFindUnfinalized(ctx context.Context, t *testing.T, db *AbuseScannerDB) 
 		t.Fatal(err)
 	}
 
-	// assertCount is a helper that checks whether the amount of unfinalized
-	// emails for given inbox equals the given count
-	assertCount := func(count int, mailbox string) error {
+	// assertUnfinalizedCount is a helper that checks whether the amount of
+	// unfinalized emails for given inbox equals the given count
+	assertUnfinalizedCount := func(count int, mailbox string) error {
 		entities, err := db.FindUnfinalized(mailbox)
 		if err != nil {
 			return err
@@ -116,7 +118,7 @@ func testFindUnfinalized(ctx context.Context, t *testing.T, db *AbuseScannerDB) 
 	}
 
 	// assert the database contains 0 unfinalized emails
-	if err := assertCount(0, "INBOX"); err != nil {
+	if err := assertUnfinalizedCount(0, "INBOX"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -131,12 +133,12 @@ func testFindUnfinalized(ctx context.Context, t *testing.T, db *AbuseScannerDB) 
 	}
 
 	// assert there's a single unfinalized email now
-	if err := assertCount(1, "INBOX"); err != nil {
+	if err := assertUnfinalizedCount(1, "INBOX"); err != nil {
 		t.Fatal(err)
 	}
 
 	// assert there's no unfinalized emails for unknown inboxes
-	if err := assertCount(0, "UNKNOWN"); err != nil {
+	if err := assertUnfinalizedCount(0, "UNKNOWN"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -170,7 +172,6 @@ func testFindUnparsed(ctx context.Context, t *testing.T, db *AbuseScannerDB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unparsed.Parsed = true
 	err = db.UpdateNoLock(*unparsed, bson.M{
 		"$set": bson.M{
 			"parsed": true,
@@ -208,7 +209,8 @@ func testFindUnreported(ctx context.Context, t *testing.T, db *AbuseScannerDB) {
 		t.Fatal(err)
 	}
 
-	// assert there's no unreported emails
+	// assert there's no unreported emails, the email we just inserted has a
+	// terrorism tag, we're only looking to report csam related emails to NCMEC.
 	if err := assertCount(db.FindUnreported, 0); err != nil {
 		t.Fatal(err)
 	}

@@ -154,7 +154,6 @@ func (a AbuseEmail) result() ([]string, []string) {
 // String returns a string representation of the abuse email
 func (a AbuseEmail) String() string {
 	// convenience variables
-	pr := a.ParseResult
 	blocked, unblocked := a.result()
 
 	var sb strings.Builder
@@ -176,8 +175,8 @@ func (a AbuseEmail) String() string {
 
 	// write reporter info
 	sb.WriteString("\nReporter:\n")
-	sb.WriteString(fmt.Sprintf("Name: %v\n", pr.Reporter.Name))
-	sb.WriteString(fmt.Sprintf("Email: %v\n", pr.Reporter.Email))
+	sb.WriteString(fmt.Sprintf("Name: %v\n", a.ParseResult.Reporter.Name))
+	sb.WriteString(fmt.Sprintf("Email: %v\n", a.ParseResult.Reporter.Email))
 
 	// write response template
 	sb.WriteString("\nResponse Template:\n\n")

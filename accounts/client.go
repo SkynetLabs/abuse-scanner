@@ -80,7 +80,7 @@ func (c *AccountsClient) get(endpoint string, query url.Values, obj interface{})
 		return errors.AddContext(err, "failed to create request")
 	}
 
-	// set headers and execute the request
+	// execute the request
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -93,11 +93,7 @@ func (c *AccountsClient) get(endpoint string, query url.Values, obj interface{})
 	}
 
 	// handle the response body
-	err = json.NewDecoder(res.Body).Decode(obj)
-	if err != nil {
-		return err
-	}
-	return nil
+	return json.NewDecoder(res.Body).Decode(obj)
 }
 
 // drainAndClose reads rc until EOF and then closes it. drainAndClose should

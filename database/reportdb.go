@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	lock "github.com/square/mongo-lock"
 	"gitlab.com/NebulousLabs/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -30,13 +29,6 @@ type (
 
 		InsertedAt time.Time `bson:"inserted_at"`
 	}
-
-	// ncmecReportLock represents a lock on an ncmec report.
-	ncmecReportLock struct {
-		staticClient         *lock.Client
-		staticEmailUID       string
-		staticPortalHostname string
-	}
 )
 
 // NewReportLock returns a lock on a report entity
@@ -51,11 +43,7 @@ func (db *AbuseScannerDB) InsertReport(report NCMECReport) error {
 
 	coll := db.staticDatabase.Collection(collNCMECReports)
 	_, err := coll.InsertOne(ctx, report)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 // FindReport returns the report for given object id.
