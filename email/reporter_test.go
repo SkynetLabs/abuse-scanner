@@ -333,12 +333,12 @@ func testReporter(t *testing.T) {
 	// unmarshal them into actual reports
 	var reports []report
 	for _, ncmecReport := range ncmecReports {
-		var report report
-		err := xml.Unmarshal([]byte(ncmecReport.Report), &report)
+		var r report
+		err := xml.Unmarshal([]byte(ncmecReport.Report), &r)
 		if err != nil {
 			t.Fatal(err)
 		}
-		reports = append(reports, report)
+		reports = append(reports, r)
 	}
 
 	for _, report := range reports {

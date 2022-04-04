@@ -188,7 +188,7 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 		return errors.AddContext(err, "could not build reports")
 	}
 
-	// build the report for every uploaders and set of skylinks, and insert it
+	// build the report for every uploader and set of skylinks, and insert it
 	// into the database, another process will file the report with NCMEC
 	for _, report := range reports {
 		reportBytes, err := xml.Marshal(report)
@@ -197,7 +197,7 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 			continue
 		}
 
-		// constract the initial report, this does not contain any uploader info
+		// construct the initial report, this does not contain any uploader info
 		err = abuseDB.InsertReport(
 			database.NCMECReport{
 				ID:         primitive.NewObjectID(),
@@ -341,7 +341,10 @@ func (r *Reporter) fileReports() {
 
 	// loop over all unfiled reports and file them with NCMEC
 	for _, report := range unfiled {
-		r.fileReport(report)
+		err := r.fileReport(report)
+		if err != nil {
+			logger.Infof("Failed filing report, err %v", err)
+		}
 	}
 }
 
@@ -465,12 +468,15 @@ func (r *Reporter) openReport(entity database.NCMECReport) (uint64, error) {
 	}
 	if err != nil {
 		// update the email and set the report err
-		err = errors.Compose(err, r.staticAbuseDatabase.UpdateReportNoLock(entity, bson.M{
+		updateErr := r.staticAbuseDatabase.UpdateReportNoLock(entity, bson.M{
 			"$set": bson.M{
 				"filed_err": err.Error(),
 			},
-		}))
-		logger.Errorf("failed to open report, err '%v'", err)
+		})
+		if updateErr != nil {
+			logger.Errorf("failed to open report, err '%v'", updateErr)
+			err = errors.Compose(err, updateErr)
+		}
 		return 0, err
 	}
 	reportId := resp.ReportId
@@ -484,7 +490,9 @@ func (r *Reporter) openReport(entity database.NCMECReport) (uint64, error) {
 	})
 	if err != nil {
 		logger.Errorf("failed to update report '%v', err '%v'", entity.ID.Hex(), err)
-		return reportId, nil
+		// we don't return the error here, instead we return the report id so we
+		// can try and "finish" the report with NCMEC, if that succeeds and we
+		// can mark this email as reported it does not have to be retried
 	}
 
 	return reportId, nil
