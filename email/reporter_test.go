@@ -1,6 +1,7 @@
 package email
 
 import (
+	"abuse-scanner/accounts"
 	"abuse-scanner/database"
 	"context"
 	"encoding/xml"
@@ -15,6 +16,75 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.sia.tech/siad/build"
 )
+
+const (
+	// skylinks used in testing
+	sl1 = "AADhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJCC"
+	sl2 = "BBDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJDD"
+	sl3 = "CCDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJEE"
+	sl4 = "DDDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJFF"
+)
+
+var (
+	// timestamps used in testing
+	ul1 = time.Now().Add(-time.Hour).UTC()
+	ul2 = time.Now().Add(-2 * time.Hour).UTC()
+	ul3 = time.Now().Add(-3 * time.Hour).UTC()
+)
+
+type (
+	// mockAccountsClient is a simple struct that allows mocking the accounts
+	// API.
+	mockAccountsClient struct{}
+)
+
+// UploadInfoGET mocks the API response
+func (m mockAccountsClient) UploadInfoGET(skylink string) ([]accounts.UploadInfo, error) {
+	switch skylink {
+	case sl1:
+		return []accounts.UploadInfo{
+			{
+				Skylink:   sl1,
+				IP:        "81.196.117.164",
+				CreatedAt: ul1,
+				UploaderInfo: accounts.UploaderInfo{
+					Sub:   "user_1_sub",
+					Email: "user.one@gmail.com",
+				},
+			},
+		}, nil
+	case sl2:
+		return []accounts.UploadInfo{
+			{
+				Skylink:   sl2,
+				IP:        "", // no IP
+				CreatedAt: ul2,
+				UploaderInfo: accounts.UploaderInfo{
+					Sub:   "user_1_sub",
+					Email: "user.one@gmail.com",
+				},
+			},
+		}, nil
+	case sl3:
+		return []accounts.UploadInfo{
+			{
+				Skylink:   sl3,
+				IP:        "13.192.32.50",
+				CreatedAt: ul3,
+				UploaderInfo: accounts.UploaderInfo{
+					Sub:      "user_2_sub",
+					Email:    "user.two@gmail.com",
+					StripeID: "stripe_id_user_2",
+				},
+			},
+		}, nil
+	case sl4:
+		// mock no info on sl4
+		return nil, nil
+	}
+
+	return nil, nil
+}
 
 // TestReporter contains a set of unit tests that cover the reporter struct.
 func TestReporter(t *testing.T) {
@@ -70,7 +140,7 @@ func testReporter(t *testing.T) {
 
 	// create the abuse databases
 	abuseDBName := t.Name() + "_AbuseDB"
-	abuseDB, err := database.NewTestAbuseScannerDB(ctx, abuseDBName, logger)
+	abuseDB, err := database.NewTestAbuseScannerDB(ctx, abuseDBName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,50 +150,10 @@ func testReporter(t *testing.T) {
 		}
 	}()
 
-	// create a skynet database
-	skynetDBName := t.Name() + "_SkynetDB"
-	skynetDB, err := database.NewTestSkynetDB(ctx, skynetDBName, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := skynetDB.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}()
-
-	// insert 4 uploads, where 2 of them are made by 1 uploader, 1 done by
-	// another and the fourth by an anonymous/unknown user
-	uploadedAt1 := time.Now().Add(-time.Hour).UTC()
-	insertTestUpload(
-		skynetDB,
-		"AADhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJCC",
-		"81.196.117.164",
-		"user.one@gmail.com",
-		uploadedAt1,
-	)
-	uploadedAt2 := time.Now().Add(-2 * time.Hour).UTC()
-	insertTestUpload(
-		skynetDB,
-		"BBDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJDD",
-		"", // no IP
-		"user.one@gmail.com",
-		uploadedAt2,
-	)
-	uploadedAt3 := time.Now().Add(-3 * time.Hour).UTC()
-	insertTestUpload(
-		skynetDB,
-		"CCDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJEE",
-		"13.192.32.50",
-		"user.two@gmail.com",
-		uploadedAt3,
-	)
-
-	// the 4th one is not inserted as it's an unknown/anonymous uploader
-
 	// create a reporter
+	accountsMock := mockAccountsClient{}
 	reporter := newTestReporter()
-	r := NewReporter(abuseDB, skynetDB, creds, "https://siasky.net", reporter, logger)
+	r := NewReporter(abuseDB, accountsMock, creds, "https://siasky.net", reporter, logger)
 
 	// insert an email to report
 	insertedAt := time.Now().UTC()
@@ -139,10 +169,10 @@ func testReporter(t *testing.T) {
 		ParseResult: database.AbuseReport{
 			Tags: []string{"csam"},
 			Skylinks: []string{
-				"AADhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJCC",
-				"BBDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJDD",
-				"CCDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJEE",
-				"DDDhDhfUZizFdo6f6DG03JTiNQmgxTt96UnjJfcvnViJFF",
+				sl1,
+				sl2,
+				sl3,
+				sl4,
 			}},
 
 		InsertedAt: insertedAt,
@@ -242,7 +272,7 @@ func testReporter(t *testing.T) {
 				{
 					IPAddress: "81.196.117.164",
 					EventName: "Upload",
-					Date:      uploadedAt1.Format(time.RFC3339),
+					Date:      ul1.Format(time.RFC3339),
 				},
 			},
 		},
@@ -269,9 +299,10 @@ func testReporter(t *testing.T) {
 				{
 					IPAddress: "13.192.32.50",
 					EventName: "Upload",
-					Date:      uploadedAt3.Format(time.RFC3339),
+					Date:      ul3.Format(time.RFC3339),
 				},
 			},
+			AdditionalInfo: "Credit Card Info on file.",
 		},
 	}
 	expected3 := report{
@@ -328,20 +359,5 @@ func newTestReporter() NCMECReporter {
 			LastName:  "Inc.",
 			Email:     "abuse@skynetlabs.com",
 		},
-	}
-}
-
-// insertTestUpload is a helper function that inserts a dummy upload with given
-// properties.
-func insertTestUpload(db *database.SkynetDB, uploadedSkylink, uploaderIP, uploaderEmail string, uploadTimestamp time.Time) {
-	if err := db.InsertTestUpload(&database.SkynetUploadHydrated{
-		SkynetUpload: database.SkynetUpload{
-			UploaderIP: uploaderIP,
-			Timestamp:  uploadTimestamp,
-		},
-		Skylink: uploadedSkylink,
-		User:    &database.SkynetUser{Email: uploaderEmail}},
-	); err != nil {
-		build.Critical(err)
 	}
 }

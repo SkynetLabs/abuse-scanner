@@ -16,6 +16,10 @@ import (
 )
 
 const (
+	// anonUser is a helper constant used to identify an anonymous upload for
+	// which we don't have any information
+	anonUser = "anon"
+
 	// maxShutdownTimeout is the amount of time we wait on the waitgroup when
 	// Stop is being called before returning an error that indicates an unclean
 	// shutdown.
@@ -45,7 +49,7 @@ type (
 	// abuse reports that have not been reported to NCMEC yet.
 	Reporter struct {
 		staticAbuseDatabase  *database.AbuseScannerDB
-		staticAccountsClient *accounts.AccountsClient
+		staticAccountsClient accounts.AccountsAPI
 		staticClient         *NCMECClient
 		staticLogger         *logrus.Entry
 		staticPortalURL      string
@@ -56,7 +60,7 @@ type (
 )
 
 // NewReporter creates a new reporter.
-func NewReporter(abuseDB *database.AbuseScannerDB, accountsClient *accounts.AccountsClient, creds NCMECCredentials, portalURL string, reporter NCMECReporter, logger *logrus.Logger) *Reporter {
+func NewReporter(abuseDB *database.AbuseScannerDB, accountsClient accounts.AccountsAPI, creds NCMECCredentials, portalURL string, reporter NCMECReporter, logger *logrus.Logger) *Reporter {
 	return &Reporter{
 		staticAbuseDatabase:  abuseDB,
 		staticAccountsClient: accountsClient,
@@ -151,7 +155,6 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 	// convenience variables
 	logger := r.staticLogger
 	abuseDB := r.staticAbuseDatabase
-	accountsClient := r.staticAccountsClient
 
 	// acquire a lock on the email
 	lock := abuseDB.NewLock(email.UID)
@@ -179,26 +182,18 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 		return nil
 	}
 
-	// find the uploads corresponding to the abusive skylinks, we group them by
-	// uploader because an NCMEC report should be unique to the person uploading
-	// the abusive content
-	uploadsPerUser := make(map[string][]*accounts.UploadInfo)
-	for _, skylink := range email.ParseResult.Skylinks {
-		info, err := accountsClient.UploadInfoGET(skylink)
-		if err != nil {
-			logger.Errorf("failed to fetch upload info, err %v", err)
-			return err
-		}
-		uploadsPerUser[info.UserSub] = append(uploadsPerUser[info.UserSub], info)
+	// build the reports
+	reports, err := r.buildReportsForEmailInner(email)
+	if err != nil {
+		return errors.AddContext(err, "could not build reports")
 	}
 
 	// build the report for every uploaders and set of skylinks, and insert it
 	// into the database, another process will file the report with NCMEC
-	for user, uploads := range uploadsPerUser {
-		report := r.buildReportForUploads(email.InsertedAt, uploads)
-		reportBytes, err := xml.Marshal(&report)
+	for _, report := range reports {
+		reportBytes, err := xml.Marshal(report)
 		if err != nil {
-			logger.Errorf("failed to build report, err %v", err)
+			logger.Errorf("failed to marshal report, err %v", err)
 			continue
 		}
 
@@ -207,7 +202,6 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 			database.NCMECReport{
 				ID:         primitive.NewObjectID(),
 				EmailID:    email.ID,
-				UserID:     user,
 				Report:     string(reportBytes),
 				InsertedAt: time.Now().UTC(),
 			},
@@ -231,9 +225,42 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 	return nil
 }
 
+// buildReportsForEmailInner will build a set of NCMEC reports for the given
+// email and persist them in the database. It's called by buildReportsForEmail.
+func (r *Reporter) buildReportsForEmailInner(email database.AbuseEmail) ([]report, error) {
+	incidentDate := email.InsertedAt
+
+	// group the upload infos per user
+	grouped := make(map[string][]accounts.UploadInfo)
+	for _, skylink := range email.ParseResult.Skylinks {
+		infos, err := r.staticAccountsClient.UploadInfoGET(skylink)
+		if err != nil {
+			return nil, errors.AddContext(err, "could not fetch upload info")
+		}
+		if len(infos) == 0 {
+			grouped[anonUser] = append(grouped[anonUser], accounts.UploadInfo{
+				Skylink: skylink,
+			})
+			continue
+		}
+		for _, info := range infos {
+			user := info.Sub
+			grouped[user] = append(grouped[user], info)
+		}
+	}
+
+	// turn the uploads into reports per user, so every user will have a list of
+	// skylinks he uploaded and potentially more information about the upload
+	var reports []report
+	for user, uploads := range grouped {
+		reports = append(reports, r.buildReportForUploads(incidentDate, user, uploads))
+	}
+	return reports, nil
+}
+
 // buildReportForUploads takes an email and a set of uploads and returns an
 // NCMEC report
-func (r *Reporter) buildReportForUploads(date time.Time, user string, uploads []*accounts.UploadInfo) report {
+func (r *Reporter) buildReportForUploads(date time.Time, user string, uploads []accounts.UploadInfo) report {
 	// convenience variables
 	portalURL := r.staticPortalURL
 
@@ -241,37 +268,6 @@ func (r *Reporter) buildReportForUploads(date time.Time, user string, uploads []
 	var urls []string
 	for _, upload := range uploads {
 		urls = append(urls, fmt.Sprintf("%s/%s", portalURL, upload.Skylink))
-	}
-
-	// construct the ip catures
-	var ipCaptures []ncmecIPCaptureEvent
-	for _, upload := range uploads {
-		if upload.UploaderIP == "" {
-			continue
-		}
-		ipCaptures = append(ipCaptures, ncmecIPCaptureEvent{
-			IPAddress: upload.UploaderIP,
-			EventName: "Upload",
-			Date:      upload.Timestamp.Format(time.RFC3339),
-		})
-	}
-
-	// construct the uploader
-	var uploader *ncmecReportedPerson
-	if len(ipCaptures) > 0 {
-		if uploader == nil {
-			uploader = &ncmecReportedPerson{}
-		}
-		uploader.IPCaptureEvent = ipCaptures
-	}
-	if user != nil {
-		if uploader == nil {
-			uploader = &ncmecReportedPerson{}
-		}
-		uploader.UserReported = ncmecPerson{Email: uploads[0].User.Email}
-		if user.StripeID != "" {
-			uploader.AdditionalInfo = "Credit Card Info on file."
-		}
 	}
 
 	// create the report
@@ -288,10 +284,35 @@ func (r *Reporter) buildReportForUploads(date time.Time, user string, uploads []
 		},
 		Reporter: r.staticReporter,
 	}
-	if uploader != nil {
-		report.Uploader = *uploader
+
+	// return early if we don't have any uploader info
+	if user == anonUser {
+		return report
 	}
 
+	// construct the ip catures
+	var ipCaptures []ncmecIPCaptureEvent
+	for _, upload := range uploads {
+		if upload.IP == "" {
+			continue
+		}
+		ipCaptures = append(ipCaptures, ncmecIPCaptureEvent{
+			IPAddress: upload.IP,
+			EventName: "Upload",
+			Date:      upload.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	// construct the uploader
+	var additionalInfo string
+	if uploads[0].UploaderInfo.StripeID != "" {
+		additionalInfo = "Credit Card Info on file."
+	}
+	report.Uploader = ncmecReportedPerson{
+		IPCaptureEvent: ipCaptures,
+		AdditionalInfo: additionalInfo,
+		UserReported:   ncmecPerson{Email: uploads[0].UploaderInfo.Email},
+	}
 	return report
 }
 

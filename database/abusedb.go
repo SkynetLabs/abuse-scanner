@@ -150,11 +150,8 @@ func NewAbuseScannerDB(ctx context.Context, portalHostName, mongoDbName, mongoUr
 		},
 		collNCMECReports: {
 			{
-				Keys: bson.D{
-					{Key: "email_id", Value: 1},
-					{Key: "user_id", Value: 1},
-				},
-				Options: options.Index().SetUnique(true),
+				Keys:    bson.M{"email_id": 1},
+				Options: options.Index(),
 			},
 			{
 				Keys:    bson.M{"filed": 1},

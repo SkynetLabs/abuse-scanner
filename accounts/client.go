@@ -15,6 +15,13 @@ import (
 )
 
 type (
+	// AccountsAPI defines an interface for the accounts API. This is useful for
+	// testing purposes as it can then be mocked in testing.
+	AccountsAPI interface {
+		// UploadInfoGET returns the upload info for given skylink
+		UploadInfoGET(skylink string) ([]UploadInfo, error)
+	}
+
 	// AccountsClient is a helper struct that is used to communicate with the
 	// accounts API.
 	AccountsClient struct {

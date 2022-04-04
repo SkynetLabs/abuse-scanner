@@ -1,6 +1,7 @@
 package main
 
 import (
+	"abuse-scanner/accounts"
 	"abuse-scanner/database"
 	"abuse-scanner/email"
 	"fmt"
@@ -32,6 +33,8 @@ func main() {
 	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
 	abusePortalURL := sanitizePortalURL(os.Getenv("ABUSE_PORTAL_URL"))
 	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
+	accountsHost := os.Getenv("ACCOUNTS_HOST")
+	accountsPort := os.Getenv("ACCOUNTS_PORT")
 	blockerHost := os.Getenv("BLOCKER_HOST")
 	blockerPort := os.Getenv("BLOCKER_PORT")
 	serverDomain := os.Getenv("SERVER_DOMAIN")
@@ -128,7 +131,6 @@ func main() {
 	// create a new reporter, it will scan for emails that contain CSAM and
 	// report those instances to NCMEC.
 	var reporter *email.Reporter
-	var skynetDB *database.SkynetDB
 	if ncmecReportingEnabled {
 		// load NCMEC credentials
 		ncmecCredentials, err := email.LoadNCMECCredentials()
@@ -142,14 +144,11 @@ func main() {
 			log.Fatal("Failed to load NCMEC reporter", err)
 		}
 
-		// create a skynet database instance
-		skynetDB, err = database.NewSkynetDB(ctx, database.DBSkynet, mongoUri, mongoCreds, logger)
-		if err != nil {
-			log.Fatalf("Failed to initialize skynet database client, err: %v", err)
-		}
+		// create an accounts client
+		accountsClient := accounts.NewAccountsClient(accountsHost, accountsPort)
 
 		logger.Info("Initializing reporter...")
-		reporter := email.NewReporter(abuseDB, skynetDB, ncmecCredentials, abusePortalURL, ncmecReporter, logger)
+		reporter := email.NewReporter(abuseDB, accountsClient, ncmecCredentials, abusePortalURL, ncmecReporter, logger)
 		err = reporter.Start()
 		if err != nil {
 			log.Fatal("Failed to start the NCMEC reporter, err: ", err)
@@ -173,7 +172,6 @@ func main() {
 	if reporter != nil {
 		err = errors.Compose(
 			err,
-			skynetDB.Close(),
 			reporter.Stop(),
 		)
 	}

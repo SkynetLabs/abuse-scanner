@@ -20,7 +20,6 @@ type (
 	NCMECReport struct {
 		ID      primitive.ObjectID `bson:"_id"`
 		EmailID primitive.ObjectID `bson:"email_id"`
-		UserID  string             `bson:"user_id"`
 
 		Filed    bool      `bson:"filed"`
 		FiledAt  time.Time `bson:"filed_at"`
