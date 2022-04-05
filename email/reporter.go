@@ -474,9 +474,9 @@ func (r *Reporter) openReport(entity database.NCMECReport) (uint64, error) {
 			},
 		})
 		if updateErr != nil {
-			logger.Errorf("failed to open report, err '%v'", updateErr)
 			err = errors.Compose(err, updateErr)
 		}
+		logger.Errorf("failed to open report, err '%v'", err)
 		return 0, err
 	}
 	reportId := resp.ReportId
