@@ -39,8 +39,8 @@ accordingly.
 - `ABUSE_MAILBOX`
 - `ABUSE_NCMEC_REPORTING_ENABLED`
 - `ABUSE_SPONSOR`
-- `ACCOUNTS_HOST`, example `accounts`
-- `ACCOUNTS_PORT`, examplegit `3000`
+- `SKYNET_ACCOUNTS_HOST`, e.g `accounts`
+- `SKYNET_ACCOUNTS_PORT`, e.g `3000`
 - `BLOCKER_HOST`
 - `BLOCKER_PORT`
 - `EMAIL_SERVER`
