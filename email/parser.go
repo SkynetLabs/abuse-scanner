@@ -27,7 +27,7 @@ const (
 )
 
 var (
-	skylinkRE           = regexp.MustCompile("^.*//([a-z0-9]{55})|/([a-zA-Z0-9-_]{46}).*$")
+	skylinkRE           = regexp.MustCompile("^.*://([a-z0-9]{55})|://.*\\..*/([a-zA-Z0-9-_]{46}).*$")
 	validateSkylink64RE = regexp.MustCompile("^([a-zA-Z0-9-_]{46})$")
 	validateSkylink32RE = regexp.MustCompile("^([a-zA-Z0-9-_]{55})$")
 )
@@ -376,5 +376,5 @@ func extractTextFromHTML(r io.Reader) (string, error) {
 		}
 	}
 
-	return strings.Join(text, "\n"), nil
+	return strings.Join(text, ""), nil
 }
