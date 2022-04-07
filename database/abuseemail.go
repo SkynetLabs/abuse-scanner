@@ -63,6 +63,10 @@ type (
 		Finalized   bool      `bson:"finalized"`
 		FinalizedAt time.Time `bson:"finalized_at"`
 		FinalizedBy string    `bson:"finalized_by"`
+
+		// fields set by reporter
+		Reported   bool      `bson:"reported"`
+		ReportedAt time.Time `bson:"reported_at"`
 	}
 
 	// AbuseReport contains all information about an abuse report.
@@ -80,40 +84,6 @@ type (
 		OtherContact string `bson:"other_contact"`
 	}
 )
-
-// String returns a string representation of the abuse email
-func (a AbuseEmail) String() string {
-	// convenience variables
-	pr := a.ParseResult
-	blocked, unblocked := a.result()
-
-	var sb strings.Builder
-	sb.WriteString("\nAbuse Scanner Report:\n")
-
-	// write summary
-	sb.WriteString("\nSummary:\n")
-	if len(blocked) == 0 && len(unblocked) == 0 {
-		sb.WriteString("FAILURE - no skylinks found.\n")
-	} else if len(unblocked) != 0 {
-		sb.WriteString("FAILURE - not all skylinks blocked.\n")
-	} else {
-		sb.WriteString("SUCCESS - all skylinks blocked.\n")
-	}
-
-	// write server info
-	sb.WriteString("\nServer Info:\n")
-	sb.WriteString(fmt.Sprintf("Domain: %v\n", a.InsertedBy))
-
-	// write reporter info
-	sb.WriteString("\nReporter:\n")
-	sb.WriteString(fmt.Sprintf("Name: %v\n", pr.Reporter.Name))
-	sb.WriteString(fmt.Sprintf("Email: %v\n", pr.Reporter.Email))
-
-	// write response template
-	sb.WriteString("\nResponse Template:\n\n")
-	sb.WriteString(a.response())
-	return sb.String()
-}
 
 // response is a small helper method that returns an automated response for this
 // abuse email
@@ -143,7 +113,7 @@ Please verify the link is not corrupted as we need it in order to prevent access
 	sb.WriteString("Hello,\n\n")
 
 	if len(blocked) > 0 {
-		sb.WriteString(fmt.Sprintf("the following links were identified and blocked on all of our servers as of %v\n\n", a.BlockedAt.Format("Mon Jan _2 15:04:05 2006")))
+		sb.WriteString(fmt.Sprintf("the following links were identified and blocked on all of our servers as of %v\n\n", a.BlockedAt.Format(time.RFC3339)))
 		for _, skylink := range blocked {
 			sb.WriteString(fmt.Sprintf("- %s\n", skylink))
 		}
@@ -179,4 +149,47 @@ func (a AbuseEmail) result() ([]string, []string) {
 		}
 	}
 	return blocked, unblocked
+}
+
+// String returns a string representation of the abuse email
+func (a AbuseEmail) String() string {
+	// convenience variables
+	blocked, unblocked := a.result()
+
+	var sb strings.Builder
+	sb.WriteString("\nAbuse Scanner Report:\n")
+
+	// write summary
+	sb.WriteString("\nSummary:\n")
+	if len(blocked) == 0 && len(unblocked) == 0 {
+		sb.WriteString("FAILURE - no skylinks found.\n")
+	} else if len(unblocked) != 0 {
+		sb.WriteString("FAILURE - not all skylinks blocked.\n")
+	} else {
+		sb.WriteString("SUCCESS - all skylinks blocked.\n")
+	}
+
+	// write server info
+	sb.WriteString("\nServer Info:\n")
+	sb.WriteString(fmt.Sprintf("Domain: %v\n", a.InsertedBy))
+
+	// write reporter info
+	sb.WriteString("\nReporter:\n")
+	sb.WriteString(fmt.Sprintf("Name: %v\n", a.ParseResult.Reporter.Name))
+	sb.WriteString(fmt.Sprintf("Email: %v\n", a.ParseResult.Reporter.Email))
+
+	// write response template
+	sb.WriteString("\nResponse Template:\n\n")
+	sb.WriteString(a.response())
+	return sb.String()
+}
+
+// HasTag returns true if the abuse report contains the given tag.
+func (ar AbuseReport) HasTag(tag string) bool {
+	for _, arTag := range ar.Tags {
+		if tag == arTag {
+			return true
+		}
+	}
+	return false
 }
