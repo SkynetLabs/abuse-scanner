@@ -104,6 +104,16 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 		}
 	}()
 
+	// now that we have the lock, check whether the email has not yet been
+	// finalized by another process, if so we just return
+	current, err := abuseDB.FindOne(email.UID)
+	if err != nil {
+		return errors.AddContext(err, "could not find email")
+	}
+	if current.Finalized {
+		return nil
+	}
+
 	// generate a uuid as message id
 	var u *uuid.UUID
 	u, err = uuid.NewV4()
@@ -124,18 +134,18 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 	reader := strings.NewReader(msg)
 
 	// append an email with the abuse report result
-	err = client.Append(f.staticMailbox, nil, time.Now(), reader)
+	err = client.Append(f.staticMailbox, nil, time.Now().UTC(), reader)
 	if err != nil {
 		return err
 	}
 
 	// update the email
-	err = abuseDB.UpdateNoLock(email, bson.D{
-		{"$set", bson.D{
-			{"finalized", true},
-			{"finalized_by", f.staticServerDomain},
-			{"finalized_at", time.Now().UTC()},
-		}},
+	err = abuseDB.UpdateNoLock(email, bson.M{
+		"$set": bson.M{
+			"finalized":    true,
+			"finalized_by": f.staticServerDomain,
+			"finalized_at": time.Now().UTC(),
+		},
 	})
 	if err != nil {
 		return errors.AddContext(err, "could not update email")
@@ -188,7 +198,7 @@ func (f *Finalizer) finalizeMessages() {
 
 	logger.Infof("Found %v unfinalized messages", numUnfinalized)
 
-	// loop all emails and parse them
+	// loop all emails and finalize them
 	for _, email := range toFinalize {
 		err := f.finalizeEmail(client, email)
 		if err != nil {
