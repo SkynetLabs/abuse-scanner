@@ -35,16 +35,16 @@ func TestAbuseEmail(t *testing.T) {
 // String method on the abuse email.
 func testString(t *testing.T) {
 	// draft a dummy abuse email
-	blockedAt := time.Now()
+	blockedAt := time.Now().UTC()
 	email := AbuseEmail{
 		InsertedBy: "some-server.skynetlabs.com",
-		InsertedAt: time.Now(),
+		InsertedAt: time.Now().UTC(),
 
 		Blocked:   true,
 		BlockedAt: blockedAt,
 
 		Parsed:   true,
-		ParsedAt: time.Now(),
+		ParsedAt: time.Now().UTC(),
 
 		ParseResult: AbuseReport{
 			Reporter: AbuseReporter{
@@ -80,7 +80,7 @@ func testString(t *testing.T) {
 		t.Fatal("unexpected", email.String())
 	}
 	email.BlockResult[1] = AbuseStatusBlocked
-	if !hasString("SUCCESS - all skylinks blocked") {
+	if !hasString("SUCCESS") {
 		t.Fatal("unexpected", email.String())
 	}
 
@@ -112,7 +112,7 @@ Therefore we are not to be held accountable for any potential abusive content it
 We will, however, do everything in our power to block access from said content when it gets reported.
 
 Thank you for your report.
-`, blockedAt.Format("Mon Jan _2 15:04:05 2006"))
+`, blockedAt.Format(time.RFC3339))
 
 	// assert it's identical
 	actual := email.String()
@@ -128,13 +128,13 @@ func testTemplate(t *testing.T) {
 	blockedAt := time.Now().UTC()
 	email := AbuseEmail{
 		InsertedBy: "some-server.skynetlabs.com",
-		InsertedAt: time.Now(),
+		InsertedAt: time.Now().UTC(),
 
 		Blocked:   true,
 		BlockedAt: blockedAt,
 
 		Parsed:   true,
-		ParsedAt: time.Now(),
+		ParsedAt: time.Now().UTC(),
 		ParseResult: AbuseReport{
 			Reporter: AbuseReporter{
 				Name:  "Skynetlabs Dev Team",
@@ -184,7 +184,7 @@ Therefore we are not to be held accountable for any potential abusive content it
 We will, however, do everything in our power to block access from said content when it gets reported.
 
 Thank you for your report.
-`, blockedAt.Format("Mon Jan _2 15:04:05 2006"))
+`, blockedAt.Format(time.RFC3339))
 
 	// assert it's identical
 	actual = email.response()
@@ -212,7 +212,7 @@ Therefore we are not to be held accountable for any potential abusive content it
 We will, however, do everything in our power to block access from said content when it gets reported.
 
 Thank you for your report.
-`, blockedAt.Format("Mon Jan _2 15:04:05 2006"))
+`, blockedAt.Format(time.RFC3339))
 
 	// assert it's identical
 	actual = email.response()

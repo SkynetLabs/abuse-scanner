@@ -1,10 +1,12 @@
 package main
 
 import (
+	"abuse-scanner/accounts"
 	"abuse-scanner/database"
 	"abuse-scanner/email"
 	"fmt"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -29,16 +31,36 @@ func main() {
 	abuseLoglevel := os.Getenv("ABUSE_LOG_LEVEL")
 	abuseMailaddress := os.Getenv("ABUSE_MAILADDRESS")
 	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
+	abusePortalURL := sanitizePortalURL(os.Getenv("ABUSE_PORTAL_URL"))
 	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
+	accountsHost := os.Getenv("SKYNET_ACCOUNTS_HOST")
+	accountsPort := os.Getenv("SKYNET_ACCOUNTS_PORT")
 	blockerHost := os.Getenv("BLOCKER_HOST")
 	blockerPort := os.Getenv("BLOCKER_PORT")
 	serverDomain := os.Getenv("SERVER_DOMAIN")
+
+	// parse ncmec reporting enabled variable
+	ncmecReportingEnabled := false
+	ncmecReportingEnabledStr := os.Getenv("ABUSE_NCMEC_REPORTING_ENABLED")
+	if ncmecReportingEnabledStr != "" {
+		var err error
+		ncmecReportingEnabled, err = strconv.ParseBool(ncmecReportingEnabledStr)
+		if err != nil {
+			log.Fatalf("Failed parsing the value for env variable ABUSE_NCMEC_REPORTING_ENABLED '%s' as a boolean, err %v", ncmecReportingEnabledStr, err)
+		}
+	}
 
 	// TODO: validate env variables
 
 	// sanitize the inputs
 	abuseMailbox = strings.Trim(abuseMailbox, "\"")
 	abuseSponsor = strings.Trim(abuseSponsor, "\"")
+
+	// load email credentials
+	emailCredentials, err := loadEmailCredentials()
+	if err != nil {
+		log.Fatal("Failed to load email credentials", err)
+	}
 
 	// initialize a logger
 	logger := logrus.New()
@@ -63,20 +85,14 @@ func main() {
 	}
 
 	// create a database instance
-	db, err := database.NewAbuseScannerDB(ctx, serverDomain, mongoUri, database.DBAbuseScanner, mongoCreds, logger)
+	abuseDB, err := database.NewAbuseScannerDB(ctx, serverDomain, database.DBAbuseScanner, mongoUri, mongoCreds, logger)
 	if err != nil {
 		log.Fatalf("Failed to initialize database client, err: %v", err)
 	}
 
-	// load email credentials
-	emailCredentials, err := loadEmailCredentials()
-	if err != nil {
-		log.Fatal("Failed to load email credentials", err)
-	}
-
 	// create a new mail fetcher, it downloads the emails
 	logger.Info("Initializing email fetcher...")
-	fetcher := email.NewFetcher(ctx, db, emailCredentials, abuseMailbox, serverDomain, logger)
+	fetcher := email.NewFetcher(ctx, abuseDB, emailCredentials, abuseMailbox, serverDomain, logger)
 	err = fetcher.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email fetcher, err: ", err)
@@ -85,7 +101,7 @@ func main() {
 	// create a new mail parser, it parses any email that's not parsed yet for
 	// abuse skylinks and a set of abuse tag
 	logger.Info("Initializing email parser...")
-	parser := email.NewParser(ctx, db, serverDomain, abuseSponsor, logger)
+	parser := email.NewParser(ctx, abuseDB, serverDomain, abuseSponsor, logger)
 	err = parser.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email parser, err: ", err)
@@ -95,7 +111,7 @@ func main() {
 	// parsed but not blocked yet, it uses the blocker API for this.
 	logger.Info("Initializing blocker...")
 	blockerApiUrl := fmt.Sprintf("http://%s:%s", blockerHost, blockerPort)
-	blocker := email.NewBlocker(ctx, blockerApiUrl, db, logger)
+	blocker := email.NewBlocker(ctx, blockerApiUrl, abuseDB, logger)
 	err = blocker.Start()
 	if err != nil {
 		log.Fatal("Failed to start the blocker, err: ", err)
@@ -106,10 +122,37 @@ func main() {
 	// when the abuse scanner has replied with a report of all the skylinks that
 	// have been found and blocked.
 	logger.Info("Initializing finalizer...")
-	finalizer := email.NewFinalizer(ctx, db, emailCredentials, abuseMailaddress, abuseMailbox, serverDomain, logger)
+	finalizer := email.NewFinalizer(ctx, abuseDB, emailCredentials, abuseMailaddress, abuseMailbox, serverDomain, logger)
 	err = finalizer.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email finalizer, err: ", err)
+	}
+
+	// create a new reporter, it will scan for emails that contain CSAM and
+	// report those instances to NCMEC.
+	var reporter *email.Reporter
+	if ncmecReportingEnabled {
+		// load NCMEC credentials
+		ncmecCredentials, err := email.LoadNCMECCredentials()
+		if err != nil {
+			log.Fatal("Failed to load NCMEC credentials", err)
+		}
+
+		// load NCMEC reporter
+		ncmecReporter, err := email.LoadNCMECReporter()
+		if err != nil {
+			log.Fatal("Failed to load NCMEC reporter", err)
+		}
+
+		// create an accounts client
+		accountsClient := accounts.NewAccountsClient(accountsHost, accountsPort)
+
+		logger.Info("Initializing reporter...")
+		reporter := email.NewReporter(abuseDB, accountsClient, ncmecCredentials, abusePortalURL, ncmecReporter, logger)
+		err = reporter.Start()
+		if err != nil {
+			log.Fatal("Failed to start the NCMEC reporter, err: ", err)
+		}
 	}
 
 	// catch exit signals
@@ -120,12 +163,18 @@ func main() {
 	// on exit call cancel and stop all components
 	cancel()
 	err = errors.Compose(
-		db.Close(),
+		abuseDB.Close(),
 		fetcher.Stop(),
 		parser.Stop(),
 		blocker.Stop(),
 		finalizer.Stop(),
 	)
+	if reporter != nil {
+		err = errors.Compose(
+			err,
+			reporter.Stop(),
+		)
+	}
 	if err != nil {
 		log.Fatal("Failed to cleanly close all components, err: ", err)
 	}
@@ -171,4 +220,19 @@ func loadEmailCredentials() (email.Credentials, error) {
 		return email.Credentials{}, errors.New("missing env var 'EMAIL_PASSWORD'")
 	}
 	return creds, nil
+}
+
+// sanitizePortalURL is a helper function that sanitizes the given input portal
+// URL, stripping away trailing slashes and ensuring it's prefixed with https.
+func sanitizePortalURL(portalURL string) string {
+	portalURL = strings.TrimSpace(portalURL)
+	portalURL = strings.TrimSuffix(portalURL, "/")
+	if strings.HasPrefix(portalURL, "https://") {
+		return portalURL
+	}
+	portalURL = strings.TrimPrefix(portalURL, "http://")
+	if portalURL == "" {
+		return portalURL
+	}
+	return fmt.Sprintf("https://%s", portalURL)
 }
