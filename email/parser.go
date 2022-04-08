@@ -277,19 +277,23 @@ func extractSkylinks(input []byte) []string {
 	// range over the string line by line and extract potential skylinks
 	sc := bufio.NewScanner(bytes.NewBuffer(input))
 	for sc.Scan() {
-		line := strings.ReplaceAll(sc.Text(), " ", "")
-		for _, matches := range append(
-			skylink64RE.FindAllStringSubmatch(line, -1),
-			skylink32RE.FindAllStringSubmatch(line, -1)...,
-		) {
-			for _, match := range matches {
-				if validateSkylink64RE.Match([]byte(match)) {
-					maybeSkylinks = append(maybeSkylinks, match)
-					continue
-				}
-				if validateSkylink32RE.Match([]byte(match)) {
-					maybeSkylinks = append(maybeSkylinks, match)
-					continue
+		for _, line := range []string{
+			sc.Text(),
+			strings.ReplaceAll(sc.Text(), " ", ""),
+		} {
+			for _, matches := range append(
+				skylink64RE.FindAllStringSubmatch(line, -1),
+				skylink32RE.FindAllStringSubmatch(line, -1)...,
+			) {
+				for _, match := range matches {
+					if validateSkylink64RE.Match([]byte(match)) {
+						maybeSkylinks = append(maybeSkylinks, match)
+						continue
+					}
+					if validateSkylink32RE.Match([]byte(match)) {
+						maybeSkylinks = append(maybeSkylinks, match)
+						continue
+					}
 				}
 			}
 		}
