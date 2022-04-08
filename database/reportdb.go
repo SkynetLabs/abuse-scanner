@@ -24,8 +24,9 @@ type (
 		FiledAt  time.Time `bson:"filed_at"`
 		FiledErr string    `bson:"filed_err"`
 
-		Report   string `bson:"report"`
-		ReportID uint64 `bson:"report_id"`
+		Report      string `bson:"report"`
+		ReportID    uint64 `bson:"report_id"`
+		ReportDebug bool   `bson:"report_debug"`
 
 		InsertedAt time.Time `bson:"inserted_at"`
 	}

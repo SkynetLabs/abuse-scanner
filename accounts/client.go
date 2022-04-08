@@ -48,7 +48,7 @@ type (
 // NewAccountsClient returns a new accounts client
 func NewAccountsClient(host, port string) *AccountsClient {
 	return &AccountsClient{
-		staticAccountsURL: fmt.Sprintf("%s:%s", host, port),
+		staticAccountsURL: fmt.Sprintf("http://%s:%s", host, port),
 	}
 }
 
