@@ -27,7 +27,9 @@ const (
 )
 
 var (
-	skylinkRE           = regexp.MustCompile("^.*://([a-z0-9]{55})|://.*\\..*/([a-zA-Z0-9-_]{46}).*$")
+	skylink64RE = regexp.MustCompile(".+?://.+?\\..+?/([a-zA-Z0-9-_]{46})")
+	skylink32RE = regexp.MustCompile(".+?://([a-zA-Z0-9-_]{55})")
+
 	validateSkylink64RE = regexp.MustCompile("^([a-zA-Z0-9-_]{46})$")
 	validateSkylink32RE = regexp.MustCompile("^([a-zA-Z0-9-_]{55})$")
 )
@@ -276,14 +278,19 @@ func extractSkylinks(input []byte) []string {
 	sc := bufio.NewScanner(bytes.NewBuffer(input))
 	for sc.Scan() {
 		line := strings.ReplaceAll(sc.Text(), " ", "")
-		for _, match := range skylinkRE.FindStringSubmatch(line) {
-			if validateSkylink32RE.Match([]byte(match)) {
-				maybeSkylinks = append(maybeSkylinks, match)
-				continue
-			}
-			if validateSkylink64RE.Match([]byte(match)) {
-				maybeSkylinks = append(maybeSkylinks, match)
-				continue
+		for _, matches := range append(
+			skylink64RE.FindAllStringSubmatch(line, -1),
+			skylink32RE.FindAllStringSubmatch(line, -1)...,
+		) {
+			for _, match := range matches {
+				if validateSkylink64RE.Match([]byte(match)) {
+					maybeSkylinks = append(maybeSkylinks, match)
+					continue
+				}
+				if validateSkylink32RE.Match([]byte(match)) {
+					maybeSkylinks = append(maybeSkylinks, match)
+					continue
+				}
 			}
 		}
 	}
