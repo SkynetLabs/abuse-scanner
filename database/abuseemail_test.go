@@ -112,7 +112,7 @@ Therefore we are not to be held accountable for any potential abusive content it
 We will, however, do everything in our power to block access from said content when it gets reported.
 
 Thank you for your report.
-`, blockedAt.Format(time.RFC3339))
+`, blockedAt.Format(time.RFC1123))
 
 	// assert it's identical
 	actual := email.String()
@@ -184,7 +184,7 @@ Therefore we are not to be held accountable for any potential abusive content it
 We will, however, do everything in our power to block access from said content when it gets reported.
 
 Thank you for your report.
-`, blockedAt.Format(time.RFC3339))
+`, blockedAt.Format(time.RFC1123))
 
 	// assert it's identical
 	actual = email.response()
@@ -212,7 +212,7 @@ Therefore we are not to be held accountable for any potential abusive content it
 We will, however, do everything in our power to block access from said content when it gets reported.
 
 Thank you for your report.
-`, blockedAt.Format(time.RFC3339))
+`, blockedAt.Format(time.RFC1123))
 
 	// assert it's identical
 	actual = email.response()
