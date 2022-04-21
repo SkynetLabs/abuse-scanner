@@ -27,8 +27,13 @@ const (
 )
 
 var (
-	skylink64RE = regexp.MustCompile(".+?://.+?\\..+?/([a-zA-Z0-9-_]{46})")
-	skylink32RE = regexp.MustCompile(".+?://([a-zA-Z0-9-_]{55})")
+	// extractSkylink64RE is a regex that is capable of extracting base-64
+	// encoded skylinks from text
+	extractSkylink64RE = regexp.MustCompile(".+?://.+?\\..+?/([a-zA-Z0-9-_]{46})")
+
+	// extractSkylink32RE is a regex that is capable of extracting base-32
+	// encoded skylinks from text
+	extractSkylink32RE = regexp.MustCompile(".+?://([a-zA-Z0-9-_]{55})")
 
 	validateSkylink64RE = regexp.MustCompile("^([a-zA-Z0-9-_]{46})$")
 	validateSkylink32RE = regexp.MustCompile("^([a-zA-Z0-9-_]{55})$")
@@ -282,8 +287,8 @@ func extractSkylinks(input []byte) []string {
 			strings.ReplaceAll(sc.Text(), " ", ""),
 		} {
 			for _, matches := range append(
-				skylink64RE.FindAllStringSubmatch(line, -1),
-				skylink32RE.FindAllStringSubmatch(line, -1)...,
+				extractSkylink64RE.FindAllStringSubmatch(line, -1),
+				extractSkylink32RE.FindAllStringSubmatch(line, -1)...,
 			) {
 				for _, match := range matches {
 					if validateSkylink64RE.Match([]byte(match)) {
