@@ -18,6 +18,25 @@ var (
 	// exampleBody is an example body of an abuse email as it gets reported by a
 	// provider, the Skylinks in the examples are scrambled and not real.
 	exampleBody = []byte(`
+	X-UI-Out-Filterresults: notjunk:1;V03:K0:sQbC5Bf/7VA=:BVBvnd1QjaGT0MiZL1Ho9A
+	 IfQpxAOa2PG7BhMwdjkSKRkIi/0Xi320ptoRVrfdAAfeBr+OlbE7g1lSC70AY1aq/+Fpbv4wK
+	 3w2N9ynN89sZ8DCaJdB7ly3XgvTsG63gsWdX8Qx0neby0Ej1pajsGSgib3Zm8tezcKH7kM+uH
+	 8vULEwVR983S1CyJCBaD2LqZ2TmObmdS+5OJ/edFn2tq2WoPNrpgdm2AFO0gTOwQJ7h7ZG7Cw
+	 C51GLljzSwED8mirSv3crcZeIBAS1Id6HFLPoaPWp4PveU/v0K8KtULYo7z19AK6hQgwViBiU
+	 Xq2l7J/I405Ww4d83HRzSQk5RYrUot3RK7Z1kuWHlS2xZrnuwbD/O/2jZ1wqm8ODWogMHSGkU
+	 I98W13ylJ0OsjeGFO+nsutUv3MjInhjUV3BBvOsnOMPOEOB6O6XEm1wr4UtjHcc9NUBPBvNh9
+	 H+gscpw0FrvBbZa+9XSyucw0nXv8ux6AcRDIkceD/k7QPuQ9qF7tieTcu08DuYDQn9NyBefCl
+	 RgFTNK0mc/IGzqsAmjjLJjN3Or8ZFb9AGX4Km12EJu5AVmgaX8HWNy7TkwU/G/8fRhwNm1MZA
+	 tvKIzaih0+MQ3vhyhX68w4FaCyw03DtqUuXiWc/B+ieWBognxojBZW8fnl6gh1JAtvlo0LKQp
+	 GMyXa9CB0//7vKj4QzhelXKBJJgYM8711kf0IFnD84KydbfFnV0LupfaJ57SHxX6EQpsO8YE5
+	 Q3y3pDDyLVRM6fCl4EjRAoVRJTN+cWfVrqR2XbR8PzsEhgLpvc0oqDoNuLLFLc9tNZyVRm+3M
+	 NDkpXctNC4+MD8zqzyiDiRUOZ27w9qeZqUIEqMlbnpmYnILxrfZL8A5WXYajQ5BDUYi1oMT4W
+	 UT47J3cxaP66B+03lzJqMDPAxGGzBoH4buNH0ku66gi0xcmhQtBcWhfDsGM9V9RSXeG/2FmHI
+	 i4y3714s6I4zN5G7Fr7EPgg61IkFB+swtoo1O5WrNJ+jFWe5nIsCXWCinXRZgaD4Q2/+57VP5
+	 idJHzNoSCPhRv6mwO/9+ia/4pVxgU8wVX6huAHRsFD2WkmpU42jsBGiWOwFj43HTwPuBxfBH9
+	 VhQDFA5VMxSpI+4TBiXX9ZYWqnKGpBoBtfKDHqGxF5C1JqWv2xMsiUD9c43po1Z9SsfBEC2A5
+	 cfV/KfZ5odL68cjZ0s7OQXt36o
+
 	Hello,
 
 	Please be informed that we have located another phishing content located at the following URLs:
@@ -110,6 +129,9 @@ func testExtractSkylinks(t *testing.T) {
 	}
 
 	// assert we have extracted the correct skylinks
+	//
+	// NOTE: we didn't discover IGzqsAmjjLJjN3Or8ZFb9AGX4Km12EJu5AVmgaX8HWNy7Q
+	// which could have been a false positive as it's a valid skylink
 	sort.Strings(skylinks)
 	if skylinks[0] != "CADEnmNNR6arnyDSH60MlGjQK5O3Sv-ecK1PGt3MNmQUhA" ||
 		skylinks[1] != "GABJJhT8AlfNh-XS-6YVH8en7O-t377ej9XS2eclnv2yFg" || skylinks[2] != "GAEE7l0IkIVcVEHDgRCcNkRYS8keZKr9v_ffxf9_614m6g" || skylinks[3] != "nAA_hbtNaOYyR2WrM9UNIc5jRu4WfGy5QK_iTGosDgLmSA" {

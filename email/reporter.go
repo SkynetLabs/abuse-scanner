@@ -51,6 +51,7 @@ type (
 		staticAbuseDatabase  *database.AbuseScannerDB
 		staticAccountsClient accounts.AccountsAPI
 		staticClient         *NCMECClient
+		staticDebug          bool
 		staticLogger         *logrus.Entry
 		staticPortalURL      string
 		staticReporter       NCMECReporter
@@ -65,6 +66,7 @@ func NewReporter(abuseDB *database.AbuseScannerDB, accountsClient accounts.Accou
 		staticAbuseDatabase:  abuseDB,
 		staticAccountsClient: accountsClient,
 		staticClient:         NewNCMECClient(creds),
+		staticDebug:          creds.Debug,
 		staticLogger:         logger.WithField("module", "Reporter"),
 		staticPortalURL:      portalURL,
 		staticReporter:       reporter,
@@ -200,10 +202,12 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 		// construct the initial report, this does not contain any uploader info
 		err = abuseDB.InsertReport(
 			database.NCMECReport{
-				ID:         primitive.NewObjectID(),
-				EmailID:    email.ID,
-				Report:     string(reportBytes),
-				InsertedAt: time.Now().UTC(),
+				ID: primitive.NewObjectID(),
+
+				EmailID:     email.ID,
+				InsertedAt:  time.Now().UTC(),
+				Report:      string(reportBytes),
+				ReportDebug: r.staticDebug,
 			},
 		)
 		if err != nil {
