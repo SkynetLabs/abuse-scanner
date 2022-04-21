@@ -145,9 +145,11 @@ func testExtractSkylinks(t *testing.T) {
 	Please be informed that we have located another phishing content located at the following URLs:
 
 	hxxps:// 7g01n1fmusamd3k4c5l7ahb39356rfhfs92e9mjshj1vq93vk891m2o [.] siasky [.] net
+
+	hxxps:// [.] eu-ger-1 [.] siasky [.] net / 1005m6ki628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr1o
 	`))
-	if len(skylinks) != 1 {
-		t.Fatalf("unexpected amount of skylinks found, %v != 1", len(skylinks))
+	if len(skylinks) != 2 {
+		t.Fatalf("unexpected amount of skylinks found, %v != 2", len(skylinks))
 	}
 
 	// NOTE: it will have loaded the base32 encoded version Skylink and output

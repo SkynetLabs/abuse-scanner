@@ -33,7 +33,7 @@ var (
 
 	// extractSkylink32RE is a regex that is capable of extracting base-32
 	// encoded skylinks from text
-	extractSkylink32RE = regexp.MustCompile(".+?://([a-zA-Z0-9-_]{55})")
+	extractSkylink32RE = regexp.MustCompile(".+?://.*?([a-zA-Z0-9-_]{55})")
 
 	validateSkylink64RE = regexp.MustCompile("^([a-zA-Z0-9-_]{46})$")
 	validateSkylink32RE = regexp.MustCompile("^([a-zA-Z0-9-_]{55})$")
