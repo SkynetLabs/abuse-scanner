@@ -113,7 +113,7 @@ Please verify the link is not corrupted as we need it in order to prevent access
 	sb.WriteString("Hello,\n\n")
 
 	if len(blocked) > 0 {
-		sb.WriteString(fmt.Sprintf("the following links were identified and blocked on all of our servers as of %v\n\n", a.BlockedAt.Format(time.RFC3339)))
+		sb.WriteString(fmt.Sprintf("the following links were identified and blocked on all of our servers as of %v\n\n", a.BlockedAt.Format(time.RFC1123)))
 		for _, skylink := range blocked {
 			sb.WriteString(fmt.Sprintf("- %s\n", skylink))
 		}
