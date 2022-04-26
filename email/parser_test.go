@@ -145,9 +145,11 @@ func testExtractSkylinks(t *testing.T) {
 	Please be informed that we have located another phishing content located at the following URLs:
 
 	hxxps:// 7g01n1fmusamd3k4c5l7ahb39356rfhfs92e9mjshj1vq93vk891m2o [.] siasky [.] net
+
+	hxxps:// [.] eu-ger-1 [.] siasky [.] net / 1005m6ki628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr1o
 	`))
-	if len(skylinks) != 1 {
-		t.Fatalf("unexpected amount of skylinks found, %v != 1", len(skylinks))
+	if len(skylinks) != 2 {
+		t.Fatalf("unexpected amount of skylinks found, %v != 2", len(skylinks))
 	}
 
 	// NOTE: it will have loaded the base32 encoded version Skylink and output
@@ -158,6 +160,34 @@ func testExtractSkylinks(t *testing.T) {
 	}
 	if skylinks[0] != sl.String() {
 		t.Fatal("unexpected skylinks", skylinks, sl.String())
+	}
+
+	// extract multiple base32 skylinks on single line
+	skylinks = extractSkylinks([]byte(`
+	before https://300g9rit1288an2k871o244s6p25giu93pialvdvuvfsbvrvtdf2dqg.siasky.net/foo/bar https://1005m6ki628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr1o.siasky.net/index.html after
+	`))
+	if len(skylinks) != 2 {
+		t.Log(skylinks)
+		t.Fatalf("unexpected amount of skylinks found, %v != 2", len(skylinks))
+	}
+	sort.Strings(skylinks)
+	if skylinks[0] != "CABbGpIwkPL0WDkiHUt5iMlWK-u5RYmdwsKuUY-TGyC9hw" ||
+		skylinks[1] != "GAEE7l0IkIVcVEHDgRCcNkRYS8keZKr9v_ffxf9_614m6g" {
+		t.Fatal("unexpected skylinks", skylinks)
+	}
+
+	// extract multiple base64 skylinks on single line
+	skylinks = extractSkylinks([]byte(`
+	before https://siasky.net/GAEE7l0IkIVcVEHDgRCcNkRYS8keZKr9v_ffxf9_614m6g?foo=bar https://siasky.net/CABbGpIwkPL0WDkiHUt5iMlWK-u5RYmdwsKuUY-TGyC9hw/index.html after
+	`))
+	if len(skylinks) != 2 {
+		t.Log(skylinks)
+		t.Fatalf("unexpected amount of skylinks found, %v != 2", len(skylinks))
+	}
+	sort.Strings(skylinks)
+	if skylinks[0] != "CABbGpIwkPL0WDkiHUt5iMlWK-u5RYmdwsKuUY-TGyC9hw" ||
+		skylinks[1] != "GAEE7l0IkIVcVEHDgRCcNkRYS8keZKr9v_ffxf9_614m6g" {
+		t.Fatal("unexpected skylinks", skylinks)
 	}
 }
 
