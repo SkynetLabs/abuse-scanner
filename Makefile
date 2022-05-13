@@ -32,21 +32,10 @@ markdown-spellcheck:
 # lint runs golangci-lint (which includes golint, a spellcheck of the codebase,
 # and other linters), the custom analyzers, and also a markdown spellchecker.
 lint: fmt markdown-spellcheck vet
-	golint ./...
 	golangci-lint run -c .golangci.yml
 	go mod tidy
 	analyze -lockcheck -- $(pkgs)
 
-# lint-ci runs golint.
-lint-ci:
-
-# golint is skipped on Windows.
-ifneq ("$(OS)","Windows_NT")
-# Linux
-	go get -d golang.org/x/lint/golint
-	golint -min_confidence=1.0 -set_exit_status $(pkgs)
-	go mod tidy
-endif
 
 # Credentials and port we are going to use for our test MongoDB instance.
 MONGO_USER=admin
