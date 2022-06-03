@@ -19,18 +19,17 @@ on:
           - minor
           - major
 
-# env:
-#   MONGO_PORT: 37017
-#   MONGO_USER: admin
-#   MONGO_PASSWORD: aO4tV5tC1oU3oQ7u
-#   MONGO_REPLICASET: skynet
-
 jobs:
   hadolint:
     uses: SkynetLabs/.github/.github/workflows/reusable_dockerfile_lint.yml@master
 
   test:
     runs-on: ubuntu-latest
+    env:
+      MONGO_PORT: 37017
+      MONGO_USER: admin
+      MONGO_PASSWORD: aO4tV5tC1oU3oQ7u
+      MONGO_REPLICASET: skynet
     steps:
       - name: Check out repository code
         uses: actions/checkout@v3
@@ -47,20 +46,31 @@ jobs:
       #   run: make lint
       # - name: Run short tests
       #   run: make test
+      - name: Start MongoDB
+        uses: supercharge/mongodb-github-action@1.7.0
+        with:
+          # getting connection refused on following steps. try setting replicaset here with no auth
+          mongodb-version: "4.4.1"
+          # mongodb-username: ${{env.MONGO_USER}}
+          # mongodb-password: ${{env.MONGO_PASSWORD}}
+          mongodb-port: ${{env.MONGO_PORT}}
+          mongodb-replica-set: ${{env.MONGO_REPLICASET}}
+        # run: |
+        #   docker run --rm --detach --name blocker-mongo-test-db -p ${{env.MONGO_PORT}}:${{env.MONGO_PORT}} -e MONGO_INITDB_ROOT_USERNAME=${{env.MONGO_USER}} -e MONGO_INITDB_ROOT_PASSWORD=${{env.MONGO_PASSWORD}}
       - name: docker ps
         run: docker ps
-      - name: stop-remove
-        run: make stop-remove
-      - name: docker-run
-        run: make docker-run
-      - name: docker-wait
-        run: make docker-wait
-      - name: init-repl
-        run: make init-repl
-      - name: docker ps
-        run: docker ps
-      # - name: Run long tests
-      #   run: make test-long-ci
+      # - name: sleep
+      #   run: sleep 30
+      # - name: Initialize Replica Set
+      #   run: |
+      #     mongod --port=${{env.MONGO_PORT}} --replSet=${{env.MONGO_REPLICASET}}
+
+      # docker exec mongodb mongo -u ${{env.MONGO_USER}} -pwd ${{env.MONGO_PASSWORD}} --port ${{env.MONGO_PORT}} --eval 'rs.initiate({_id: \"${{env.MONGO_REPLICASET}}\", members: [{ _id: 0, host: \"localhost:${{env.MONGO_PORT}}\" }]})'
+      - name: Initialize User
+        run: |
+          docker exec mongodb mongo -u ${{env.MONGO_USER}} -pwd ${{env.MONGO_PASSWORD}} --port ${{env.MONGO_PORT}} --eval 'rs.initiate({_id: \"${{env.MONGO_REPLICASET}}\", members: [{ _id: 0, host: \"localhost:${{env.MONGO_PORT}}\" }]})'
+      - name: Run long tests
+        run: make test-long-ci
 
   # Make a release if
   # - there were changes and this is a scheduled job
