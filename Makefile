@@ -52,11 +52,8 @@ MONGO_TEST_CONTAINER_NAME=blocker-mongo-test-db
 # call_mongo is a helper function that executes a query in an `eval` call to the
 # test mongo instance.
 define call_mongo
-    docker exec $(MONGO_TEST_CONTAINER_NAME) mongo -u $(MONGO_USER) -p $(MONGO_PASSWORD) --port $(MONGO_PORT) --eval "$(2)"
+    docker exec $(MONGO_TEST_CONTAINER_NAME) mongo -u $(MONGO_USER) -p $(MONGO_PASSWORD) --port $(MONGO_PORT) --eval $(1)
 endef
-
-github-rs-init:
-	$(call call_mongo,mongo "rs.initiate({_id: \"skynet\", members: [{ _id: 0, host: \"localhost:$(MONGO_PORT)\" }]})") 1>/dev/null 2>&1
 
 stop-remove:
 	-docker stop $(MONGO_TEST_CONTAINER_NAME) 1>/dev/null 2>&1
@@ -77,9 +74,11 @@ docker-wait:
 		$(call call_mongo,"") 1>/dev/null 2>&1 ; \
 		status=$$? ; \
 	done
+
 init-repl:
 	# Initialise a single node replica set.
 	$(call call_mongo,"rs.initiate({_id: \"skynet\", members: [{ _id: 0, host: \"localhost:$(MONGO_PORT)\" }]})") 1>/dev/null 2>&1
+
 # start-mongo starts a local mongoDB container with no persistence.
 # We first prepare for the start of the container by making sure the test
 # keyfile has the right permissions, then we clear any potential leftover
