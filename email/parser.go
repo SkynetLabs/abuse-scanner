@@ -129,24 +129,12 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 
 			t, _, _ := p.Header.ContentType()
 			switch t {
-			case "text/plain":
-				body, err = ioutil.ReadAll(p.Body)
-				if err != nil {
-					logger.Errorf("error occurred while trying to read multipart body, err: %v", err)
-					break
-				}
-
-				// extract all skylinks from the email body
-				skylinks = append(skylinks, extractSkylinks(body)...)
-
-				// extract all tags from the email body
-				tags = append(tags, extractTags(body)...)
 			case "text/html":
 				// extract all text from the HTML
 				text, err := extractTextFromHTML(p.Body)
 				if err != nil {
 					logger.Errorf("error occurred while trying to read the HTML from the multipart body, err: %v", err)
-					break
+					continue
 				}
 
 				// extract all skylinks from the HTML
@@ -155,6 +143,17 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 				// extract all tags from the HTML
 				tags = append(tags, extractTags([]byte(text))...)
 			default:
+				body, err = ioutil.ReadAll(p.Body)
+				if err != nil {
+					logger.Errorf("error occurred while trying to read multipart body with content type %v, err: %v", t, err)
+					continue
+				}
+
+				// extract all skylinks from the email body
+				skylinks = append(skylinks, extractSkylinks(body)...)
+
+				// extract all tags from the email body
+				tags = append(tags, extractTags(body)...)
 			}
 		}
 	} else {

@@ -47,6 +47,7 @@ func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailC
 		staticEmailCredentials: emailCredentials,
 		staticLogger:           logger.WithField("module", "Finalizer"),
 		staticMailbox:          mailbox,
+		staticServerDomain:     serverDomain,
 	}
 }
 
