@@ -11,7 +11,6 @@ all: release
 
 deps:
 	go mod download
-	go mod tidy
 
 # count says how many times to run the tests.
 count = 1
@@ -57,7 +56,7 @@ start-mongo:
 
 stop-mongo:
 	-docker stop $(MONGO_TEST_CONTAINER_NAME)
-	
+
 # release builds and installs release binaries.
 release:
 	go install -tags='netgo' -ldflags='-s -w $(ldflags)' $(release-pkgs)
