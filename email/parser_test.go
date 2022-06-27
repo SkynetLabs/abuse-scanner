@@ -71,6 +71,48 @@ var (
 	<a href="https://r.relay.hostkey.com/tr/cl/dH8SAQr2PfuM9z2U69X3RU4lOXxLfUvBy-PoYz0i9xaU-qfb2ba8nHjnhjGmQJWvlh1RGqVuG5GRLOEjdLptEXfwTtQZwuZ-Ktri0FbnaNv4Qsq1IwvuKJBMJPPKrCqws00fZWfF5a6L27KGJyhOZ6z2sz5u3gTAI6c1Ngfuxits8DbOEwdXd35Mw2zhzPWS0bGe_PpfRvgPbv31wAxUs0MZP0eCDcrq">http://www.switch.ch/security</a></p>
 	  <img width="1" height="1" src="https://r.relay.hostkey.com/tr/op/aAMIbWQvCFUFW51yPO-mQwWdaGyPuvXUgRReI7L4Jg-v7wCrnpIWymrHdlMYdd5M6LNIEo-fcd6kxcD5KftPakp-3NrW3Z-dvYZ_KX54q8f5897S0HES-iPqJF3-uPx30Gu15Nax8rj16DaAgWW8eKHmKEZAGhMltg" alt="" /></body></html>
 	`
+
+	// multipartAlternativeBody is an example email body that uses the
+	// content-type multipart/mixed and multipart/alternative to ensure in
+	// testing we parse those parts of the email body properly
+	multipartAlternativeBody = `Delivered-To: report@siasky.net
+	Received: by 2002:a05:7000:a1a:0:0:0:0 with SMTP id ke26csp576371mab;
+			Sun, 26 Jun 2022 23:29:59 -0700 (PDT)
+	Date: Mon, 27 Jun 2022 09:29:55 +0300
+	From: =obfuscated<phishing@obfuscated.com>
+	To: response@cert-gib.ru, abuse@namecheap.com, abuse@siasky.net
+	Subject: [Ticket#22062706295325258] Phishing site
+	MIME-Version: 1.0
+	Content-Type: multipart/mixed; 
+			boundary="----=_Part_71086_603584994.1656311395405"
+	------=_Part_71086_603584994.1656311395405
+	Content-Type: multipart/alternative; 
+			boundary="----=_Part_71087_1111859740.1656311395408"
+	
+	------=_Part_71087_1111859740.1656311395408
+	Content-Type: text/plain; charset=utf-8
+	Content-Transfer-Encoding: quoted-printable
+	
+	Hi,
+	=EF=BB=BF
+	The bad news is you are hosting a phishing site:
+	https://siasky.net/BACCHn5eHow5edoimjiwBtD2ErM3OL57mf-_MghKeebanA#abuse%40y=
+	andex.ru
+	
+	The good news is that now that you know about this scam you can stop it. Pl=
+	ease shut this site down.
+	
+	It would also help us greatly to prevent any phishing activity in the futur=
+	e, if you could provide us with the source code of this site and any data t=
+	hat has already been stolen so that we could use them for analysis.
+
+	------=_Part_71087_1111859740.1656311395408
+	Content-Type: text/html; charset=utf-8
+	Content-Transfer-Encoding: 7bit
+	
+	<p>Hi,<br />&#xfeff;<br />The bad news is you are hosting a phishing site:<br /><a href="https://siasky.net/BACCHn5eHow5edoimjiwBtD2ErM3OL57mf-_MghKeebanA#abuse%obfuscated.ru" rel="nofollow">https://siasky.net/BACCHn5eHow5edoimjiwBtD2ErM3OL57mf-_MghKeebanA#abuse%40yandex.ru</a></p><br /><p>The good news is that now that you know about this scam you can stop it. Please shut this site down.</p><br /><p>It would also help us greatly to prevent any phishing activity in the future, if you could provide us with the source code of this site and any data that has already been stolen so that we could use them for analysis.</p><br /><p>--<br /><a href="https://forms.yandex.ru/surveys/10012037/?theme&#61;support-vote&amp;iframe&#61;1&amp;lang&#61;en&amp;session&#61;a20d99e6-2969-3f30-a04f-1a1b6935c3b8" rel="nofollow">Please rate our reply</a></p><br /><p>Some One<br />Support team<br /><a href="https://obfuscated.com/support/" rel="nofollow">https://obfuscated.com/support/</a></p>
+	------=_Part_71087_1111859740.1656311395408--
+	`
 )
 
 // TestParser is a collection of unit tests that probe the functionality of
@@ -86,6 +128,37 @@ func TestParser(t *testing.T) {
 	t.Run("ExtractSkylinks", testExtractSkylinks)
 	t.Run("ExtractTags", testExtractTags)
 	t.Run("ExtractTextFromHTML", testExtractTextFromHTML)
+	t.Run("ParseBody", testParseBody)
+}
+
+// testParseBody is a unit test that covers the functionality of the parseBody helper
+func testParseBody(t *testing.T) {
+	t.Parallel()
+
+	// create discard logger
+	logger := logrus.New()
+	logger.Out = ioutil.Discard
+
+	// parse our example body
+	skylinks, tags, err := parseBody([]byte(multipartAlternativeBody), logger.WithField("module", "Parser"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert we find the correct skylink and tag
+	if len(skylinks) != 1 {
+		t.Fatalf("unexpected amount of skylinks found, %v != 1", len(skylinks))
+	}
+	if skylinks[0] != "BACCHn5eHow5edoimjiwBtD2ErM3OL57mf-_MghKeebanA" {
+		t.Fatal("unexpected skylink found", skylinks[0])
+	}
+
+	if len(tags) != 1 {
+		t.Fatalf("unexpected amount of tags found, %v != 1", len(tags))
+	}
+	if tags[0] != "phishing" {
+		t.Fatal("unexpected tag found", tags[0])
+	}
 }
 
 // testDedupe is a unit test that verifies the behaviour of the 'dedupe' helper

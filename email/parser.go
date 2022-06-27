@@ -106,68 +106,17 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 	}
 
 	// extract all tags and skylinks
-	var tags []string
-	var skylinks []string
-
-	// use the message library to parse the email
-	msg, err := message.Read(bytes.NewBuffer(body))
+	skylinks, tags, err := parseBody(body, logger)
 	if err != nil {
 		return database.AbuseReport{}, err
 	}
 
-	// create a multi-part reader from the message
-	mpr := msg.MultipartReader()
-	if mpr != nil {
-		for {
-			p, err := mpr.NextPart()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				logger.Errorf("error occurred while trying to read next part from multi-part reader, err: %v", err)
-				break
-			}
-
-			t, _, _ := p.Header.ContentType()
-			switch t {
-			case "text/plain":
-				body, err = ioutil.ReadAll(p.Body)
-				if err != nil {
-					logger.Errorf("error occurred while trying to read multipart body, err: %v", err)
-					break
-				}
-
-				// extract all skylinks from the email body
-				skylinks = append(skylinks, extractSkylinks(body)...)
-
-				// extract all tags from the email body
-				tags = append(tags, extractTags(body)...)
-			case "text/html":
-				// extract all text from the HTML
-				text, err := extractTextFromHTML(p.Body)
-				if err != nil {
-					logger.Errorf("error occurred while trying to read the HTML from the multipart body, err: %v", err)
-					break
-				}
-
-				// extract all skylinks from the HTML
-				skylinks = append(skylinks, extractSkylinks([]byte(text))...)
-
-				// extract all tags from the HTML
-				tags = append(tags, extractTags([]byte(text))...)
-			default:
-			}
-		}
-	} else {
-		skylinks = extractSkylinks(body)
-		tags = extractTags(body)
-	}
-
 	// return a report
 	return database.AbuseReport{
-		Skylinks: dedupe(skylinks),
+		Skylinks: skylinks,
 		Reporter: reporter,
 		Sponsor:  p.staticSponsor,
-		Tags:     dedupe(tags),
+		Tags:     tags,
 	}, nil
 }
 
@@ -272,6 +221,68 @@ func (p *Parser) threadedParseMessages() {
 		case <-ticker.C:
 		}
 	}
+}
+
+// parseBody is a helper function that parses the given body bytes, extracted
+// as a standalone function for unit testing purposes
+func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
+	// use the message library to parse the email
+	msg, err := message.Read(bytes.NewBuffer(body))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// extract all tags and skylinks
+	var tags []string
+	var skylinks []string
+
+	// create a multi-part reader from the message
+	mpr := msg.MultipartReader()
+	if mpr != nil {
+		for {
+			p, err := mpr.NextPart()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				logger.Errorf("error occurred while trying to read next part from multi-part reader, err: %v", err)
+				break
+			}
+
+			t, _, _ := p.Header.ContentType()
+			switch t {
+			case "text/html":
+				// extract all text from the HTML
+				text, err := extractTextFromHTML(p.Body)
+				if err != nil {
+					logger.Errorf("error occurred while trying to read the HTML from the multipart body, err: %v", err)
+					continue
+				}
+
+				// extract all skylinks from the HTML
+				skylinks = append(skylinks, extractSkylinks([]byte(text))...)
+
+				// extract all tags from the HTML
+				tags = append(tags, extractTags([]byte(text))...)
+			default:
+				body, err = ioutil.ReadAll(p.Body)
+				if err != nil {
+					logger.Errorf("error occurred while trying to read multipart body with content type %v, err: %v", t, err)
+					continue
+				}
+
+				// extract all skylinks from the email body
+				skylinks = append(skylinks, extractSkylinks(body)...)
+
+				// extract all tags from the email body
+				tags = append(tags, extractTags(body)...)
+			}
+		}
+	} else {
+		skylinks = extractSkylinks(body)
+		tags = extractTags(body)
+	}
+
+	return dedupe(skylinks), dedupe(tags), nil
 }
 
 // extractSkylinks is a helper function that extracts all skylinks (as strings)
