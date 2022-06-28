@@ -153,7 +153,7 @@ func testReporter(t *testing.T) {
 	// create a reporter
 	accountsMock := mockAccountsClient{}
 	reporter := newTestReporter()
-	r := NewReporter(abuseDB, accountsMock, creds, "https://siasky.net", reporter, logger)
+	r := NewReporter(abuseDB, accountsMock, creds, "https://siasky.net", "eu-pol-2.siasky.net", reporter, logger)
 
 	// insert an email to report
 	insertedAt := time.Now().UTC()
