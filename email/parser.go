@@ -18,6 +18,8 @@ import (
 	"gitlab.com/SkynetLabs/skyd/skymodules"
 	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/net/html"
+
+	_ "github.com/emersion/go-message/charset"
 )
 
 const (
