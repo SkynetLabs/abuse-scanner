@@ -163,7 +163,7 @@ Thank you for your report.
 
 `
 	// assert it's identical
-	actual := email.response()
+	actual := email.Response()
 	if actual != expected {
 		t.Fatal(diff.LineDiff(expected, actual))
 	}
@@ -187,7 +187,7 @@ Thank you for your report.
 `, blockedAt.Format(time.RFC1123))
 
 	// assert it's identical
-	actual = email.response()
+	actual = email.Response()
 	if actual != expected {
 		t.Fatal("\n" + diff.LineDiff(expected, actual))
 	}
@@ -215,7 +215,7 @@ Thank you for your report.
 `, blockedAt.Format(time.RFC1123))
 
 	// assert it's identical
-	actual = email.response()
+	actual = email.Response()
 	if actual != expected {
 		t.Fatal(diff.LineDiff(expected, actual))
 	}
