@@ -30,6 +30,12 @@ func TestFinalizer(t *testing.T) {
 	}
 	t.Parallel()
 
+	// NOTE: this test is skipped by default, it is committed for debugging and
+	// manual testing purposes
+	if testUsername == "" || testPassword == "" {
+		t.SkipNow()
+	}
+
 	t.Run("SendAutomatedReply", testSendAutomatedReply)
 	t.Run("SendAbuseReport", testSendAbuseReport)
 }
@@ -50,27 +56,22 @@ func testSendAutomatedReply(t *testing.T) {
 // testSendAbuseReport sends the abuse report for a test email, this unit test
 // gets skipped by default but is committed for debugging purposes
 func testSendAbuseReport(t *testing.T) {
-	// NOTE: enter your email credentials here to send the test email
+	// define credentials and email parameters
 	creds := Credentials{
 		Address:  "imap.gmail.com:993",
 		Username: testUsername,
 		Password: testPassword,
 	}
-
 	abuseEmail := creds.Username
 	abuseMailbox := "INBOX"
 
-	// NOTE: this test is skipped by default, it is committed for debugging and
-	// manual testing purposes
-	if creds.Username == "" || creds.Password == "" {
-		t.SkipNow()
-	}
-
+	// create a client
 	client, err := NewClient(creds)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// construct a test email and send the abuse report
 	email := newTestEmail()
 	email.ReplyTo = testEmailTo
 	err = sendAbuseReport(client, email, abuseMailbox, abuseEmail)
