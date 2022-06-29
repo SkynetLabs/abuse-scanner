@@ -18,8 +18,6 @@ type (
 		Address  string
 		Username string
 		Password string
-
-		AppPassword string
 	}
 )
 
