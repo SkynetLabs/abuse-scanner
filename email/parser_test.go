@@ -356,7 +356,7 @@ func testExtractTextFromHTML(t *testing.T) {
 func testExtractTags(t *testing.T) {
 	t.Parallel()
 
-	// base case, assert not tags are returned
+	// base case, assert no tags are returned
 	tags := extractTags(nil)
 	if len(tags) != 0 {
 		t.Fatalf("unexpected amount of tags found, %v != 0", len(tags))
