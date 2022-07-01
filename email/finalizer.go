@@ -46,7 +46,7 @@ func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailC
 		staticContext:          ctx,
 		staticDatabase:         database,
 		staticEmailAddress:     emailAddress,
-		staticEmailAuth:        smtp.PlainAuth("", scannerEmailAddress, emailCredentials.Password, "smtp.gmail.com"),
+		staticEmailAuth:        smtp.PlainAuth("", emailCredentials.Username, emailCredentials.Password, "smtp.gmail.com"),
 		staticEmailCredentials: emailCredentials,
 		staticLogger:           logger.WithField("module", "Finalizer"),
 		staticMailbox:          mailbox,
