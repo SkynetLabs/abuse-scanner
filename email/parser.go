@@ -250,6 +250,10 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 			}
 
 			t, _, _ := p.Header.ContentType()
+			if !shouldParseMediaType(t) {
+				continue
+			}
+
 			switch t {
 			case "text/html":
 				// extract all text from the HTML
@@ -281,6 +285,11 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 	} else {
 		skylinks = extractSkylinks(body)
 		tags = extractTags(body)
+	}
+
+	// if we have not found any tags yet
+	if len(tags) == 0 {
+		tags = append(tags, database.AbuseDefaultTag)
 	}
 
 	return dedupe(skylinks), dedupe(tags), nil
@@ -376,11 +385,6 @@ func extractTags(input []byte) []string {
 		tags = append(tags, "csam")
 	}
 
-	// if we have not found any tags yet
-	if len(tags) == 0 {
-		tags = append(tags, database.AbuseDefaultTag)
-	}
-
 	return tags
 }
 
@@ -405,4 +409,13 @@ func extractTextFromHTML(r io.Reader) (string, error) {
 	}
 
 	return strings.Join(text, ""), nil
+}
+
+// shouldParseMediaType is a helper function that returns true if the given
+// media type is one that we should parse
+func shouldParseMediaType(mediaType string) bool {
+	return strings.HasPrefix(mediaType, "application") ||
+		strings.HasPrefix(mediaType, "message") ||
+		strings.HasPrefix(mediaType, "multipart") ||
+		strings.HasPrefix(mediaType, "text")
 }
