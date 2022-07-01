@@ -113,6 +113,21 @@ var (
 	<p>Hi,<br />&#xfeff;<br />The bad news is you are hosting a phishing site:<br /><a href="https://siasky.net/BACCHn5eHow5edoimjiwBtD2ErM3OL57mf-_MghKeebanA#abuse%obfuscated.ru" rel="nofollow">https://siasky.net/BACCHn5eHow5edoimjiwBtD2ErM3OL57mf-_MghKeebanA#abuse%40yandex.ru</a></p><br /><p>The good news is that now that you know about this scam you can stop it. Please shut this site down.</p><br /><p>It would also help us greatly to prevent any phishing activity in the future, if you could provide us with the source code of this site and any data that has already been stolen so that we could use them for analysis.</p><br /><p>--<br /><a href="https://forms.yandex.ru/surveys/10012037/?theme&#61;support-vote&amp;iframe&#61;1&amp;lang&#61;en&amp;session&#61;a20d99e6-2969-3f30-a04f-1a1b6935c3b8" rel="nofollow">Please rate our reply</a></p><br /><p>Some One<br />Support team<br /><a href="https://obfuscated.com/support/" rel="nofollow">https://obfuscated.com/support/</a></p>
 	------=_Part_71087_1111859740.1656311395408--
 	`
+
+	unknownCharsetBody = `Received: by 2002:a05:7000:ae16:0:0:0:0 with SMTP id ij22csp429885mab;
+	Thu, 31 Mar 2022 01:17:25 -0700 (PDT)
+Content-Type: text/plain; charset="iso-8859-1"
+MIME-Version: 1.0
+Content-Transfer-Encoding: quoted-printable
+Content-Description: Mail message body
+Subject: Obfuscated
+To: "Some User" <obfuscated@unknown.com>
+From: "Some User" <obfuscated@unknown.com>
+Date: Thu, 31 Mar 2022 09:16:57 +0100
+
+Hi,
+phishing link found
+https://siasky.net/BACCHn5eHow5edoimjiwBtD2ErM3OL57mf-_MghKeebanA`
 )
 
 // TestParser is a collection of unit tests that probe the functionality of
@@ -139,8 +154,29 @@ func testParseBody(t *testing.T) {
 	logger := logrus.New()
 	logger.Out = ioutil.Discard
 
-	// parse our example body
+	// parse our example body for various multiparts
 	skylinks, tags, err := parseBody([]byte(multipartAlternativeBody), logger.WithField("module", "Parser"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert we find the correct skylink and tag
+	if len(skylinks) != 1 {
+		t.Fatalf("unexpected amount of skylinks found, %v != 1", len(skylinks))
+	}
+	if skylinks[0] != "BACCHn5eHow5edoimjiwBtD2ErM3OL57mf-_MghKeebanA" {
+		t.Fatal("unexpected skylink found", skylinks[0])
+	}
+
+	if len(tags) != 1 {
+		t.Fatalf("unexpected amount of tags found, %v != 1", len(tags))
+	}
+	if tags[0] != "phishing" {
+		t.Fatal("unexpected tag found", tags[0])
+	}
+
+	// parse our example body for unknown charsets
+	skylinks, tags, err = parseBody([]byte(unknownCharsetBody), logger.WithField("module", "Parser"))
 	if err != nil {
 		t.Fatal(err)
 	}
