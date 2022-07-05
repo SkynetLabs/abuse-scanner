@@ -44,26 +44,26 @@ func testSender(t *testing.T) {
 	email := AbuseEmail{}
 
 	// base case
-	if email.Sender() != "" {
-		t.Fatal("unexpected sender", email.Sender())
+	if email.ReplyToEmail() != "" {
+		t.Fatal("unexpected sender", email.ReplyToEmail())
 	}
 
 	// from filled
 	email.From = "abuse@siasky.net"
-	if email.Sender() != "abuse@siasky.net" {
-		t.Fatal("unexpected sender", email.Sender())
+	if email.ReplyToEmail() != "abuse@siasky.net" {
+		t.Fatal("unexpected sender", email.ReplyToEmail())
 	}
 
 	// reply-to filled
 	email.ReplyTo = "john.doe@examle.com"
-	if email.Sender() != "john.doe@examle.com" {
-		t.Fatal("unexpected sender", email.Sender())
+	if email.ReplyToEmail() != "john.doe@examle.com" {
+		t.Fatal("unexpected sender", email.ReplyToEmail())
 	}
 
 	// only reply to filled
 	email.From = ""
-	if email.Sender() != "john.doe@examle.com" {
-		t.Fatal("unexpected sender", email.Sender())
+	if email.ReplyToEmail() != "john.doe@examle.com" {
+		t.Fatal("unexpected sender", email.ReplyToEmail())
 	}
 }
 

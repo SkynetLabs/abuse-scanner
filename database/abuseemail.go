@@ -88,8 +88,7 @@ type (
 	}
 )
 
-// Response is a small helper method that returns an automated Response for this
-// abuse email
+// Response returns an automated Response for this abuse email
 func (a AbuseEmail) Response() string {
 	// sanity check
 	if !a.Parsed || !a.Blocked {
@@ -154,10 +153,10 @@ func (a AbuseEmail) result() ([]string, []string) {
 	return blocked, unblocked
 }
 
-// Sender is a helper function that returns the sender of the email, by default
-// it returns the field from the ReplyTo header but it falls back to the From
-// field if that was empty
-func (a AbuseEmail) Sender() string {
+// ReplyToEmail is a helper function that returns the email address to which a
+// reply has to be sent. By default it returns the field from the ReplyTo header
+// but it falls back to the From field if that was empty
+func (a AbuseEmail) ReplyToEmail() string {
 	if a.ReplyTo != "" {
 		return a.ReplyTo
 	}
@@ -197,9 +196,8 @@ func (a AbuseEmail) String() string {
 	return sb.String()
 }
 
-// Success is a small helper method that indicates whether the abuse email was
-// handled successfully, which means that links were found and all of the links
-// were blocked
+// Success indicates whether the abuse email was handled successfully, which
+// means that links were found and all of the links were blocked
 func (a AbuseEmail) Success() bool {
 	blocked, unblocked := a.result()
 	return len(blocked) > 0 && len(unblocked) == 0

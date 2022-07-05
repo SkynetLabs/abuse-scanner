@@ -237,22 +237,19 @@ func sendAbuseReport(client *client.Client, email database.AbuseEmail, mailbox, 
 	}
 
 	// construct the email message
-	msg := fmt.Sprintf("Subject: Re: %s\n", email.Subject)
-	msg += fmt.Sprintf("Message-ID: <%s@abusescanner>\n", u)
-	msg += fmt.Sprintf("References: %s\n", email.MessageID)
-	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
-	msg += fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress)
-	msg += fmt.Sprintf("To: %s\n", to)
-	msg += ""
-	msg += email.String()
-	reader := strings.NewReader(msg)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Subject: Re: %s\n", email.Subject))
+	sb.WriteString(fmt.Sprintf("Message-ID: <%s@abusescanner>\n", u))
+	sb.WriteString(fmt.Sprintf("References: %s\n", email.MessageID))
+	sb.WriteString(fmt.Sprintf("In-Reply-To: %s\n", email.MessageID))
+	sb.WriteString(fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress))
+	sb.WriteString(fmt.Sprintf("To: %s\n", to))
+	sb.WriteString("")
+	sb.WriteString(email.String())
+	reader := strings.NewReader(sb.String())
 
 	// append an email with the abuse report result
-	err = client.Append(mailbox, nil, time.Now().UTC(), reader)
-	if err != nil {
-		return err
-	}
-	return nil
+	return client.Append(mailbox, nil, time.Now().UTC(), reader)
 }
 
 // sendAutomatedReply sends the automated reply for the given abuse email to the
@@ -267,19 +264,16 @@ func sendAutomatedReply(auth smtp.Auth, email database.AbuseEmail) error {
 	}
 
 	// construct the email message
-	msg := fmt.Sprintf("Subject: Re: %s\n", email.Subject)
-	msg += fmt.Sprintf("Message-ID: <%s@abusescanner>\n", u)
-	msg += fmt.Sprintf("References: %s\n", email.MessageID)
-	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
-	msg += fmt.Sprintf("From: <%s>\n", email.To)
-	msg += fmt.Sprintf("To:%s\n", email.Sender())
-	msg += ""
-	msg += email.Response()
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Subject: Re: %s\n", email.Subject))
+	sb.WriteString(fmt.Sprintf("Message-ID: <%s@abusescanner>\n", u))
+	sb.WriteString(fmt.Sprintf("References: %s\n", email.MessageID))
+	sb.WriteString(fmt.Sprintf("In-Reply-To: %s\n", email.MessageID))
+	sb.WriteString(fmt.Sprintf("From: <%s>\n", email.To))
+	sb.WriteString(fmt.Sprintf("To:%s\n", email.ReplyToEmail()))
+	sb.WriteString("")
+	sb.WriteString(email.Response())
 
 	// send the automated response
-	err = smtp.SendMail("smtp.gmail.com:587", auth, email.To, []string{email.Sender()}, []byte(msg))
-	if err != nil {
-		return err
-	}
-	return nil
+	return smtp.SendMail("smtp.gmail.com:587", auth, email.To, []string{email.ReplyToEmail()}, []byte(sb.String()))
 }

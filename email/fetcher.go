@@ -292,6 +292,11 @@ func (f *Fetcher) getMessagesToFetch(mailbox *imap.MailboxStatus, msgs []uint32)
 
 // persistMessage will persist the given message in the abuse scanner database
 func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message, section *imap.BodySectionName) error {
+	// sanity check parameters
+	if mailbox == nil || msg == nil || section == nil {
+		return errors.New("missing input parameters")
+	}
+
 	// convenience variables
 	abuseDB := f.staticDatabase
 
