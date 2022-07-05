@@ -466,6 +466,9 @@ func testBuildAbuseReport(t *testing.T) {
 	if updated.Finalized {
 		t.Fatal("expected the email to not be finalized")
 	}
+	if updated.ParsedBy != domain {
+		t.Fatal("expected the parsed_by field to be set")
+	}
 
 	// assert the parse result, note that we don't deep equal the parse result,
 	// since we use the example email body we can rest assured it's correct
