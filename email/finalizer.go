@@ -244,7 +244,7 @@ func sendAbuseReport(client *client.Client, email database.AbuseEmail, mailbox, 
 	sb.WriteString(fmt.Sprintf("In-Reply-To: %s\n", email.MessageID))
 	sb.WriteString(fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress))
 	sb.WriteString(fmt.Sprintf("To: %s\n", to))
-	sb.WriteString("")
+	sb.WriteString("\n")
 	sb.WriteString(email.String())
 	reader := strings.NewReader(sb.String())
 
@@ -271,7 +271,7 @@ func sendAutomatedReply(auth smtp.Auth, email database.AbuseEmail) error {
 	sb.WriteString(fmt.Sprintf("In-Reply-To: %s\n", email.MessageID))
 	sb.WriteString(fmt.Sprintf("From: <%s>\n", email.To))
 	sb.WriteString(fmt.Sprintf("To:%s\n", email.ReplyToEmail()))
-	sb.WriteString("")
+	sb.WriteString("\n")
 	sb.WriteString(email.Response())
 
 	// send the automated response
