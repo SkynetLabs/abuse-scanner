@@ -154,16 +154,14 @@ func (p *Parser) parseEmail(email database.AbuseEmail) (err error) {
 	}
 
 	// update the email
-	err = abuseDB.UpdateNoLock(email,
-		bson.D{
-			{"$set", bson.D{
-				{"parsed", true},
-				{"parsed_at", time.Now().UTC()},
-				{"parsed_by", p.staticServerDomain},
-				{"parse_result", report},
-			}},
+	err = abuseDB.UpdateNoLock(email, bson.M{
+		"$set": bson.M{
+			"parsed":       true,
+			"parsed_at":    time.Now().UTC(),
+			"parsed_by":    p.staticServerDomain,
+			"parse_result": report,
 		},
-	)
+	})
 	if err != nil {
 		return errors.AddContext(err, "could not update email")
 	}

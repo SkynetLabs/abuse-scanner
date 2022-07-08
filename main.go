@@ -111,7 +111,7 @@ func main() {
 	// parsed but not blocked yet, it uses the blocker API for this.
 	logger.Info("Initializing blocker...")
 	blockerApiUrl := fmt.Sprintf("http://%s:%s", blockerHost, blockerPort)
-	blocker := email.NewBlocker(ctx, blockerApiUrl, abuseDB, logger)
+	blocker := email.NewBlocker(ctx, blockerApiUrl, serverDomain, abuseDB, logger)
 	err = blocker.Start()
 	if err != nil {
 		log.Fatal("Failed to start the blocker, err: ", err)
@@ -148,7 +148,7 @@ func main() {
 		accountsClient := accounts.NewAccountsClient(accountsHost, accountsPort)
 
 		logger.Info("Initializing reporter...")
-		reporter := email.NewReporter(abuseDB, accountsClient, ncmecCredentials, abusePortalURL, ncmecReporter, logger)
+		reporter := email.NewReporter(abuseDB, accountsClient, ncmecCredentials, abusePortalURL, serverDomain, ncmecReporter, logger)
 		err = reporter.Start()
 		if err != nil {
 			log.Fatal("Failed to start the NCMEC reporter, err: ", err)

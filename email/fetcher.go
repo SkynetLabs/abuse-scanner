@@ -415,8 +415,5 @@ func hasBody(msg *imap.Message) bool {
 		return false
 	}
 	bodyLit := msg.GetBody(sectionName)
-	if bodyLit == nil {
-		return false
-	}
-	return true
+	return bodyLit != nil
 }
