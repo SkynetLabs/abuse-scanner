@@ -38,9 +38,12 @@ type (
 		UID       string             `bson:"email_uid"`
 		UIDRaw    uint32             `bson:"email_uid_raw"`
 		Body      []byte             `bson:"email_body"`
-		From      string             `bson:"email_from"`
-		Subject   string             `bson:"email_subject"`
 		MessageID string             `bson:"email_message_id"`
+		Subject   string             `bson:"email_subject"`
+
+		From    string `bson:"email_from"`
+		ReplyTo string `bson:"email_reply_to"`
+		To      string `bson:"email_to"`
 
 		InsertedBy string    `bson:"inserted_by"`
 		InsertedAt time.Time `bson:"inserted_at"`
@@ -86,9 +89,8 @@ type (
 	}
 )
 
-// response is a small helper method that returns an automated response for this
-// abuse email
-func (a AbuseEmail) response() string {
+// Response returns an automated Response for this abuse email
+func (a AbuseEmail) Response() string {
 	// sanity check
 	if !a.Parsed || !a.Blocked {
 		build.Critical("result should only be called when the email has been parsed and blocked")
@@ -152,6 +154,16 @@ func (a AbuseEmail) result() ([]string, []string) {
 	return blocked, unblocked
 }
 
+// ReplyToEmail is a helper function that returns the email address to which a
+// reply has to be sent. By default it returns the field from the ReplyTo header
+// but it falls back to the From field if that was empty
+func (a AbuseEmail) ReplyToEmail() string {
+	if a.ReplyTo != "" {
+		return a.ReplyTo
+	}
+	return a.From
+}
+
 // String returns a string representation of the abuse email
 func (a AbuseEmail) String() string {
 	// convenience variables
@@ -181,8 +193,15 @@ func (a AbuseEmail) String() string {
 
 	// write response template
 	sb.WriteString("\nResponse Template:\n\n")
-	sb.WriteString(a.response())
+	sb.WriteString(a.Response())
 	return sb.String()
+}
+
+// Success indicates whether the abuse email was handled successfully, which
+// means that links were found and all of the links were blocked
+func (a AbuseEmail) Success() bool {
+	blocked, unblocked := a.result()
+	return len(blocked) > 0 && len(unblocked) == 0
 }
 
 // HasTag returns true if the abuse report contains the given tag.

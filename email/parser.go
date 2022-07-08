@@ -105,7 +105,7 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 
 	// extract the reporter.
 	reporter := database.AbuseReporter{
-		Email: email.From,
+		Email: email.ReplyToEmail(),
 	}
 
 	// extract all tags and skylinks

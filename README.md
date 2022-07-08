@@ -23,6 +23,8 @@ The modules communicate through a shared database and a series of `boolean`s
 that define whether a certain module has handled the email in question, e.g.
 `parsed`, `blocked` and `finalized`.
 
+The finalizer replies to the abuse email with a scanner report, sent to the abuse mailbox itself. If the email was successfully handled, we also send an automated reply to the original sender of the abuse email.
+
 ## NCMEC
 
 All emails that are tagged with the `csam` are emails from which we want to

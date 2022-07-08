@@ -4,6 +4,7 @@ import (
 	"abuse-scanner/database"
 	"context"
 	"fmt"
+	"net/smtp"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,7 @@ type (
 		staticContext          context.Context
 		staticDatabase         *database.AbuseScannerDB
 		staticEmailAddress     string
+		staticEmailAuth        smtp.Auth
 		staticEmailCredentials Credentials
 		staticLogger           *logrus.Entry
 		staticMailbox          string
@@ -44,6 +46,7 @@ func NewFinalizer(ctx context.Context, database *database.AbuseScannerDB, emailC
 		staticContext:          ctx,
 		staticDatabase:         database,
 		staticEmailAddress:     emailAddress,
+		staticEmailAuth:        smtp.PlainAuth("", emailCredentials.Username, emailCredentials.Password, "smtp.gmail.com"),
 		staticEmailCredentials: emailCredentials,
 		staticLogger:           logger.WithField("module", "Finalizer"),
 		staticMailbox:          mailbox,
@@ -116,28 +119,19 @@ func (f *Finalizer) finalizeEmail(client *client.Client, email database.AbuseEma
 	}
 
 	// generate a uuid as message id
-	var u *uuid.UUID
-	u, err = uuid.NewV4()
+	err = sendAbuseReport(client, email, f.staticMailbox, f.staticEmailAddress)
 	if err != nil {
-		logger.Errorf("failed to generate uid, err %v", err)
+		logger.Errorf("failed to send abuse report, err %v", err)
 		return err
 	}
 
-	// construct the email message
-	msg := fmt.Sprintf("Subject: Re: %s\n", email.Subject)
-	msg += fmt.Sprintf("Message-ID: <%s@abusescanner\n", u)
-	msg += fmt.Sprintf("References: %s\n", email.MessageID)
-	msg += fmt.Sprintf("In-Reply-To: %s\n", email.MessageID)
-	msg += fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress)
-	msg += fmt.Sprintf("To:%s\n", f.staticEmailAddress)
-	msg += ""
-	msg += email.String()
-	reader := strings.NewReader(msg)
-
-	// append an email with the abuse report result
-	err = client.Append(f.staticMailbox, nil, time.Now().UTC(), reader)
-	if err != nil {
-		return err
+	// respond to the original sender, only if the abuse email was handled successfully
+	if email.Success() {
+		err = sendAutomatedReply(f.staticEmailAuth, email)
+		if err != nil {
+			// simply log the error, we don't return it here
+			logger.Errorf("failed to send automated reply, err %v", err)
+		}
 	}
 
 	// update the email
@@ -229,4 +223,57 @@ func (f *Finalizer) threadedFinalizeMessages() {
 		case <-ticker.C:
 		}
 	}
+}
+
+// sendAbuseReport sends the abuse report for the given abuse email to the given
+// email address. This is extracted in a standalone function for unit testing
+// purposes.
+func sendAbuseReport(client *client.Client, email database.AbuseEmail, mailbox, to string) error {
+	// generate a uuid as message id
+	var u *uuid.UUID
+	u, err := uuid.NewV4()
+	if err != nil {
+		return errors.AddContext(err, "failed to generate uid")
+	}
+
+	// construct the email message
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Subject: Re: %s\n", email.Subject))
+	sb.WriteString(fmt.Sprintf("Message-ID: <%s@abusescanner>\n", u))
+	sb.WriteString(fmt.Sprintf("References: %s\n", email.MessageID))
+	sb.WriteString(fmt.Sprintf("In-Reply-To: %s\n", email.MessageID))
+	sb.WriteString(fmt.Sprintf("From: SCANNED <%s>\n", scannerEmailAddress))
+	sb.WriteString(fmt.Sprintf("To: %s\n", to))
+	sb.WriteString("\n")
+	sb.WriteString(email.String())
+	reader := strings.NewReader(sb.String())
+
+	// append an email with the abuse report result
+	return client.Append(mailbox, nil, time.Now().UTC(), reader)
+}
+
+// sendAutomatedReply sends the automated reply for the given abuse email to the
+// original email sender. This is extracted in a standalone function for unit
+// testing purposes.
+func sendAutomatedReply(auth smtp.Auth, email database.AbuseEmail) error {
+	// generate a uuid as message id
+	var u *uuid.UUID
+	u, err := uuid.NewV4()
+	if err != nil {
+		return errors.AddContext(err, "failed to generate uid")
+	}
+
+	// construct the email message
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Subject: Re: %s\n", email.Subject))
+	sb.WriteString(fmt.Sprintf("Message-ID: <%s@abusescanner>\n", u))
+	sb.WriteString(fmt.Sprintf("References: %s\n", email.MessageID))
+	sb.WriteString(fmt.Sprintf("In-Reply-To: %s\n", email.MessageID))
+	sb.WriteString(fmt.Sprintf("From: <%s>\n", email.To))
+	sb.WriteString(fmt.Sprintf("To:%s\n", email.ReplyToEmail()))
+	sb.WriteString("\n")
+	sb.WriteString(email.Response())
+
+	// send the automated response
+	return smtp.SendMail("smtp.gmail.com:587", auth, email.To, []string{email.ReplyToEmail()}, []byte(sb.String()))
 }
