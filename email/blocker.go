@@ -30,6 +30,7 @@ type (
 		staticContext       context.Context
 		staticDatabase      *database.AbuseScannerDB
 		staticLogger        *logrus.Entry
+		staticServerDomain  string
 		staticWaitGroup     sync.WaitGroup
 	}
 
@@ -42,12 +43,13 @@ type (
 )
 
 // NewBlocker creates a new blocker.
-func NewBlocker(ctx context.Context, blockerApiUrl string, database *database.AbuseScannerDB, logger *logrus.Logger) *Blocker {
+func NewBlocker(ctx context.Context, blockerApiUrl, serverDomain string, database *database.AbuseScannerDB, logger *logrus.Logger) *Blocker {
 	return &Blocker{
 		staticBlockerApiUrl: blockerApiUrl,
 		staticContext:       ctx,
 		staticDatabase:      database,
 		staticLogger:        logger.WithField("module", "Blocker"),
+		staticServerDomain:  serverDomain,
 	}
 }
 
@@ -161,15 +163,14 @@ func (b *Blocker) blockEmail(email database.AbuseEmail) (err error) {
 	}
 
 	// update the email
-	err = abuseDB.UpdateNoLock(email,
-		bson.D{
-			{"$set", bson.D{
-				{"blocked", true},
-				{"blocked_at", time.Now().UTC()},
-				{"block_result", result},
-			}},
+	err = abuseDB.UpdateNoLock(email, bson.M{
+		"$set": bson.M{
+			"blocked":      true,
+			"blocked_by":   b.staticServerDomain,
+			"blocked_at":   time.Now().UTC(),
+			"block_result": result,
 		},
-	)
+	})
 	if err != nil {
 		return errors.AddContext(err, "could not update email")
 	}

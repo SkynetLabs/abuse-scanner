@@ -412,10 +412,7 @@ func hasBody(msg *imap.Message) bool {
 		return false
 	}
 	bodyLit := msg.GetBody(sectionName)
-	if bodyLit == nil {
-		return false
-	}
-	return true
+	return bodyLit != nil
 }
 
 // extractField is a small helper function that takes an envelope and tries to

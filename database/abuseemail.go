@@ -70,6 +70,7 @@ type (
 		// fields set by reporter
 		Reported   bool      `bson:"reported"`
 		ReportedAt time.Time `bson:"reported_at"`
+		ReportedBy string    `bson:"reported_by"`
 	}
 
 	// AbuseReport contains all information about an abuse report.

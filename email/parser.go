@@ -18,6 +18,9 @@ import (
 	"gitlab.com/SkynetLabs/skyd/skymodules"
 	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/net/html"
+
+	//nolint:golint,blank-imports
+	_ "github.com/emersion/go-message/charset"
 )
 
 const (
@@ -151,16 +154,14 @@ func (p *Parser) parseEmail(email database.AbuseEmail) (err error) {
 	}
 
 	// update the email
-	err = abuseDB.UpdateNoLock(email,
-		bson.D{
-			{"$set", bson.D{
-				{"parsed", true},
-				{"parsed_at", time.Now().UTC()},
-				{"parsed_by", p.staticServerDomain},
-				{"parse_result", report},
-			}},
+	err = abuseDB.UpdateNoLock(email, bson.M{
+		"$set": bson.M{
+			"parsed":       true,
+			"parsed_at":    time.Now().UTC(),
+			"parsed_by":    p.staticServerDomain,
+			"parse_result": report,
 		},
-	)
+	})
 	if err != nil {
 		return errors.AddContext(err, "could not update email")
 	}
@@ -249,6 +250,10 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 			}
 
 			t, _, _ := p.Header.ContentType()
+			if !shouldParseMediaType(t) {
+				continue
+			}
+
 			switch t {
 			case "text/html":
 				// extract all text from the HTML
@@ -280,6 +285,11 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 	} else {
 		skylinks = extractSkylinks(body)
 		tags = extractTags(body)
+	}
+
+	// if we have not found any tags yet
+	if len(tags) == 0 {
+		tags = append(tags, database.AbuseDefaultTag)
 	}
 
 	return dedupe(skylinks), dedupe(tags), nil
@@ -375,11 +385,6 @@ func extractTags(input []byte) []string {
 		tags = append(tags, "csam")
 	}
 
-	// if we have not found any tags yet
-	if len(tags) == 0 {
-		tags = append(tags, database.AbuseDefaultTag)
-	}
-
 	return tags
 }
 
@@ -404,4 +409,13 @@ func extractTextFromHTML(r io.Reader) (string, error) {
 	}
 
 	return strings.Join(text, ""), nil
+}
+
+// shouldParseMediaType is a helper function that returns true if the given
+// media type is one that we should parse
+func shouldParseMediaType(mediaType string) bool {
+	return strings.HasPrefix(mediaType, "application") ||
+		strings.HasPrefix(mediaType, "message") ||
+		strings.HasPrefix(mediaType, "multipart") ||
+		strings.HasPrefix(mediaType, "text")
 }
