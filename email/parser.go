@@ -30,16 +30,21 @@ const (
 )
 
 var (
-	// extractSkylink64RE is a regex that is capable of extracting base-64
-	// encoded skylinks from text
-	extractSkylink64RE = regexp.MustCompile(".+?://.+?\\..+?/([a-zA-Z0-9-_]{46})")
+	// extractSkylink64RE and extractSkylink64RE_2 are regexes capable of
+	// extracting base-64 encoded skylinks from text
+	extractSkylink64RE   = regexp.MustCompile(`.+?://.+?\..+?/([a-zA-Z0-9-_]{46})`)
+	extractSkylink64RE_2 = regexp.MustCompile(`(http.+|hxxp.+|\..+|://.+|^)([a-zA-Z0-9-_]{46})(\?.*)?$`)
 
-	// extractSkylink32RE is a regex that is capable of extracting base-32
-	// encoded skylinks from text
-	extractSkylink32RE = regexp.MustCompile(".+?://.*?([a-zA-Z0-9-_]{55})")
+	// extractSkylink32RE and extractSkylink32RE_2 are regexes capable of
+	// extracting base-32 encoded skylinks from text
+	extractSkylink32RE   = regexp.MustCompile(`.+?://.*?([a-zA-Z0-9-_]{55})`)
+	extractSkylink32RE_2 = regexp.MustCompile(`(http.+|hxxp.+|\..+|://.+|^)([a-zA-Z0-9-_]{55})(\?.*)?$`)
 
-	validateSkylink64RE = regexp.MustCompile("^([a-zA-Z0-9-_]{46})$")
-	validateSkylink32RE = regexp.MustCompile("^([a-zA-Z0-9-_]{55})$")
+	// space matches all whitespace
+	space = regexp.MustCompile(`\s+`)
+
+	validateSkylink64RE = regexp.MustCompile(`^([a-zA-Z0-9-_]{46})$`)
+	validateSkylink32RE = regexp.MustCompile(`^([a-zA-Z0-9-_]{55})$`)
 )
 
 type (
@@ -305,11 +310,19 @@ func extractSkylinks(input []byte) []string {
 	for sc.Scan() {
 		for _, line := range []string{
 			sc.Text(),
-			strings.ReplaceAll(sc.Text(), " ", ""),
+			space.ReplaceAllString(sc.Text(), ""),
 		} {
-			for _, matches := range append(
+			base64matches := append(
 				extractSkylink64RE.FindAllStringSubmatch(line, -1),
-				extractSkylink32RE.FindAllStringSubmatch(line, -1)...,
+				extractSkylink64RE_2.FindAllStringSubmatch(line, -1)...,
+			)
+			base32matches := append(
+				extractSkylink32RE.FindAllStringSubmatch(line, -1),
+				extractSkylink32RE_2.FindAllStringSubmatch(line, -1)...,
+			)
+			for _, matches := range append(
+				base64matches,
+				base32matches...,
 			) {
 				for _, match := range matches {
 					if validateSkylink64RE.Match([]byte(match)) {
