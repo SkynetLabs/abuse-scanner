@@ -4,11 +4,14 @@ import (
 	"abuse-scanner/database"
 	"context"
 	"io/ioutil"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/andreyvit/diff"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/SkynetLabs/skyd/skymodules"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -47,6 +50,16 @@ var (
 	hxxps:// siasky [.] net/GABJJhT8AlfNh-XS-6YVH8en7O-t377ej9XS2eclnv2yFg
 
 	As a reminder, phishing is expressly prohibited by our Universal Terms of Service Agreement, paragraph 7. "Acceptable Use Policy (AUP)"
+	`)
+
+	// exampleSkyTransferBody is an example body of an abuse email, as it gets
+	// reported by a provider, that contains a skytransfer URL.
+	exampleSkyTransferBody = []byte(`
+I again affirm that the link below contains material distributed illegally, WITHOUT MY authorization. Thus, I request the immediate removal of the 02 links:
+
+https://skytransfer.hns.siasky.net/#/v2/d871327aa70cd7525a3a323bf15896ea192da03254856602c0f030baeea8da8a/12a75f63a2cc182905731d68e9211d7d828f38e1203ff210c060d2eee81e6ff92b1fc48dfbf8649ab9b20b332780544626d83822621d63a44a187a90321bdf6a
+
+My original product links:
 	`)
 
 	// htmlBody is an example body of an (actual) abuse email that contains
@@ -160,11 +173,15 @@ func TestParser(t *testing.T) {
 
 	t.Run("BuildAbuseReport", testBuildAbuseReport)
 	t.Run("Dedupe", testDedupe)
+	t.Run("ExtractPortalFromHnsDomain", testExtractPortalFromHnsDomain)
+	t.Run("ExtractSkyTransferURLs", testExtractSkyTransferURLs)
 	t.Run("ExtractSkylinks", testExtractSkylinks)
 	t.Run("ExtractTags", testExtractTags)
 	t.Run("ExtractTextFromHTML", testExtractTextFromHTML)
 	t.Run("ParseBody", testParseBody)
 	t.Run("ShouldParseMediaType", testShouldParseMediaType)
+	t.Run("WriteCypressConfig", testWriteCypressConfig)
+	t.Run("WriteCypressTests", testWriteCypressTests)
 }
 
 // testParseBody is a unit test that covers the functionality of the parseBody helper
@@ -216,6 +233,26 @@ func testParseBody(t *testing.T) {
 	if tags[0] != "phishing" {
 		t.Fatal("unexpected tag found", tags[0])
 	}
+
+	// parse our example body containing skytransfer links
+	skylinks, tags, err = parseBody([]byte(exampleSkyTransferBody), logger.WithField("module", "Parser"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// assert we find the correct skylink and tag
+	if len(skylinks) != 1 {
+		t.Fatalf("unexpected amount of skylinks found, %v != 1", len(skylinks))
+	}
+	if skylinks[0] != "AAAFb6q43vcBvF8KByAygTvWEDHW9pq95WyTDrQhPrhqRg" {
+		t.Fatal("unexpected skylink found", skylinks[0])
+	}
+
+	if len(tags) != 1 {
+		t.Fatalf("unexpected amount of tags found, %v != 1", len(tags))
+	}
+	if tags[0] != "abusive" {
+		t.Fatal("unexpected tag found", tags[0])
+	}
 }
 
 // testDedupe is a unit test that verifies the behaviour of the 'dedupe' helper
@@ -238,6 +275,75 @@ func testDedupe(t *testing.T) {
 	}
 	if output[0] != "a" || output[1] != "b" {
 		t.Fatal("unexpected output", output)
+	}
+}
+
+// testExtractPortalFromHnsDomain is a unit test that verifies the behaviour of the
+// 'extractPortalFromHnsDomain' helper function
+func testExtractPortalFromHnsDomain(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		url    string
+		portal string
+	}{
+		{
+			url:    "https://skytransfer.hns.siasky.net/#/v2/d871327aa70cd7525",
+			portal: "siasky.net",
+		},
+		{
+			url:    "https://skytransfer.hns.skyportal.xyz/#/v2/d871327aa70cd7525",
+			portal: "skyportal.xyz",
+		},
+		{
+			url:    "https://d871327aa70cd7525.skyportal.xyz/#/v2/d871327aa70cd7525",
+			portal: "",
+		},
+	}
+
+	for _, tt := range cases {
+		portal := extractPortalFromHnsDomain(tt.url)
+		if portal != tt.portal {
+			t.Errorf("unexpected portal, '%v' != '%v'", portal, tt.portal)
+		}
+	}
+}
+
+// testExtractSkyTransferURLs is a unit test that verifies the behaviour of the
+// 'extractSkyTransferURLs' helper function
+func testExtractSkyTransferURLs(t *testing.T) {
+	t.Parallel()
+
+	// create discard logger
+	logger := logrus.New()
+	logger.Out = ioutil.Discard
+
+	// prepare some simple cases
+	cases := []struct {
+		input  []byte
+		output []string
+	}{
+		{
+			input:  exampleBody,
+			output: []string{},
+		},
+		{
+			input:  exampleSkyTransferBody,
+			output: []string{"https://skytransfer.hns.siasky.net/#/v2/d871327aa70cd7525a3a323bf15896ea192da03254856602c0f030baeea8da8a/12a75f63a2cc182905731d68e9211d7d828f38e1203ff210c060d2eee81e6ff92b1fc48dfbf8649ab9b20b332780544626d83822621d63a44a187a90321bdf6a"},
+		},
+	}
+
+	for _, tt := range cases {
+		urls := extractSkyTransferURLs(tt.input, logger)
+		if len(urls) != len(tt.output) {
+			t.Errorf("unexpected urls, '%v' != '%v'", urls, tt.output)
+		}
+		sort.Strings(urls)
+		for i, url := range urls {
+			if url != tt.output[i] {
+				t.Errorf("unexpected url, '%v' != '%v'", url, tt.output[i])
+			}
+		}
 	}
 }
 
@@ -542,5 +648,134 @@ func testShouldParseMediaType(t *testing.T) {
 		if output := shouldParseMediaType(tt.mediaType); output != tt.shouldParse {
 			t.Errorf("unexpected outcome for media type '%v', %v != %v", tt.mediaType, output, tt.shouldParse)
 		}
+	}
+}
+
+// testWriteCypressConfig is a unit test that verifies the cypress config is
+// properly written to disk
+func testWriteCypressConfig(t *testing.T) {
+	t.Parallel()
+
+	// create a test dir
+	dir := t.TempDir()
+
+	// write cypress config
+	err := writeCypressConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// read the directory
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert directory contents
+	if len(files) != 1 {
+		t.Fatal("expected one file", len(files))
+	}
+	configFile := files[0]
+	if configFile.Name() != "cypress.config.js" {
+		t.Fatal("unexpected filename")
+	}
+
+	// assert file contents
+	contents, err := os.ReadFile(filepath.Join(dir, configFile.Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != cypressConfig {
+		t.Fatal("unexpected file contents", string(contents))
+	}
+}
+
+// testWriteCypressTests is a unit test that verifies the cypress test is
+// properly written to disk
+func testWriteCypressTests(t *testing.T) {
+	t.Parallel()
+
+	// create discard logger
+	logger := logrus.New()
+	logger.Out = ioutil.Discard
+
+	// create a test dir
+	dir := t.TempDir()
+
+	// assert empty case
+	err := writeCypressTests(dir, nil, logger)
+	if err == nil || !strings.Contains(err.Error(), "no cypress tests generated") {
+		t.Fatal(err)
+	}
+
+	// assert directory is still empty
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatal("unexpected dir contents", len(entries))
+	}
+
+	// assert base case
+	err = writeCypressTests(dir, []string{
+		"https://skytransfer.hns.siasky.net/#/v2/d871327/12a75f63",
+		"https://skytransfer.hns.siasky.net/#/v2/12a75f63/d871327",
+		"https://skytransfer.hns/#/v2/invalid/portal",
+	}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert directory contains subdir /cypress/integrations
+	entries, err = os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || !entries[0].IsDir() || entries[0].Name() != "cypress" {
+		t.Fatal("unexpected dir contents", entries)
+	}
+	subpath := filepath.Join(dir, entries[0].Name())
+	entries, err = os.ReadDir(subpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || !entries[0].IsDir() || entries[0].Name() != "integration" {
+		t.Fatal("unexpected dir contents", entries)
+	}
+	subpath = filepath.Join(subpath, entries[0].Name())
+	entries, err = os.ReadDir(subpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].IsDir() || entries[0].Name() != "test.cy.js" {
+		t.Fatal("unexpected dir contents", entries)
+	}
+
+	// assert file contents
+	subpath = filepath.Join(subpath, entries[0].Name())
+	contents, err := os.ReadFile(subpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := `describe('SkyTransfer URL Resolver', () => {
+  it('Resolves skylink for https://skytransfer.hns.siasky.net/#/v2/d871327/12a75f63', () => {
+    cy.visit('https://skytransfer.hns.siasky.net/#/v2/d871327/12a75f63');
+    cy.intercept('https://siasky.net/*').as('myReq');
+    cy.get('.ant-btn').contains('Download all files').click();
+    cy.wait('@myReq').should(($obj) => {cy.task('log', $obj.request.url)});
+    cy.wait(30000);
+  })
+  it('Resolves skylink for https://skytransfer.hns.siasky.net/#/v2/12a75f63/d871327', () => {
+    cy.visit('https://skytransfer.hns.siasky.net/#/v2/12a75f63/d871327');
+    cy.intercept('https://siasky.net/*').as('myReq');
+    cy.get('.ant-btn').contains('Download all files').click();
+    cy.wait('@myReq').should(($obj) => {cy.task('log', $obj.request.url)});
+    cy.wait(30000);
+  })
+})
+`
+	if string(contents) != expected {
+		t.Fatal("unexpected file contents", diff.LineDiff(expected, string(contents)))
 	}
 }

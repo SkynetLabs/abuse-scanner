@@ -5,8 +5,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -24,6 +29,32 @@ import (
 )
 
 const (
+	cypressConfig = `
+const { defineConfig } = require('cypress')
+module.exports = defineConfig({
+	e2e: {
+		defaultCommandTimeout: 15000,
+		setupNodeEvents(on, config) {
+			on('task', {
+				log(message) {
+					console.log(message)
+					return null
+				},
+			})
+		},
+		screenshotOnRunFailure: false,
+		specPattern: 'cypress/integration/**/*.cy.js',
+		supportFile: false,
+		video: false
+	}
+})`
+
+	// defaultDirPerm defines the default permissions used for a new dir
+	defaultDirPerm = 0755
+
+	// defaultFilePerm defines the default permissions used for a new file
+	defaultFilePerm = 0644
+
 	// parseFrequency defines the frequency with which the parser looks for
 	// emails to be parsed
 	parseFrequency = 30 * time.Second
@@ -32,11 +63,18 @@ const (
 var (
 	// extractSkylink64RE is a regex that is capable of extracting base-64
 	// encoded skylinks from text
-	extractSkylink64RE = regexp.MustCompile(".+?://.+?\\..+?/([a-zA-Z0-9-_]{46})")
+	extractSkylink64RE = regexp.MustCompile(`.+?://.+?\..+?/([a-zA-Z0-9-_]{46})`)
 
 	// extractSkylink32RE is a regex that is capable of extracting base-32
 	// encoded skylinks from text
-	extractSkylink32RE = regexp.MustCompile(".+?://.*?([a-zA-Z0-9-_]{55})")
+	extractSkylink32RE = regexp.MustCompile(`.+?://.*?([a-zA-Z0-9-_]{55})`)
+
+	// extractSkytransferURL is a regex that is capable of extracting skytransfer URLs
+	extractSkytransferURL = regexp.MustCompile(`^.*(https://skytransfer.hns.*/.*)$`)
+
+	// extractPortalURL is a regex that is capable of extracting the portal from
+	// an hns URL
+	extractPortalURL = regexp.MustCompile(`^https://.*\.hns\.(.*?)/.*`)
 
 	validateSkylink64RE = regexp.MustCompile("^([a-zA-Z0-9-_]{46})$")
 	validateSkylink32RE = regexp.MustCompile("^([a-zA-Z0-9-_]{55})$")
@@ -236,6 +274,7 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 	// extract all tags and skylinks
 	var tags []string
 	var skylinks []string
+	var skytransferURLs []string
 
 	// create a multi-part reader from the message
 	mpr := msg.MultipartReader()
@@ -266,6 +305,9 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 				// extract all skylinks from the HTML
 				skylinks = append(skylinks, extractSkylinks([]byte(text))...)
 
+				// extract all skytransfer URLs from the HTML
+				skytransferURLs = append(skytransferURLs, extractSkyTransferURLs([]byte(text), logger.Logger)...)
+
 				// extract all tags from the HTML
 				tags = append(tags, extractTags([]byte(text))...)
 			default:
@@ -278,12 +320,16 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 				// extract all skylinks from the email body
 				skylinks = append(skylinks, extractSkylinks(body)...)
 
+				// extract all skytransfer URLs from the HTML
+				skytransferURLs = append(skytransferURLs, extractSkyTransferURLs(body, logger.Logger)...)
+
 				// extract all tags from the email body
 				tags = append(tags, extractTags(body)...)
 			}
 		}
 	} else {
 		skylinks = extractSkylinks(body)
+		skytransferURLs = append(skytransferURLs, extractSkyTransferURLs(body, logger.Logger)...)
 		tags = extractTags(body)
 	}
 
@@ -292,7 +338,35 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 		tags = append(tags, database.AbuseDefaultTag)
 	}
 
+	// if we have found skytransfer URLs, resolve them to skylinks
+	if len(skytransferURLs) > 0 {
+		resolvedSkylinks, err := resolveSkyTransferURLs(skytransferURLs, logger.Logger)
+		if err != nil {
+			fmt.Println(err)
+			logger.Errorf("failed to resolve skytransfer URLs, err %v", err)
+		} else {
+			skylinks = append(skylinks, resolvedSkylinks...)
+		}
+	}
+
 	return dedupe(skylinks), dedupe(tags), nil
+}
+
+// dedupe is a helper function that deduplicates the given input slice
+func dedupe(input []string) []string {
+	if len(input) == 0 {
+		return input
+	}
+
+	var deduped []string
+	seen := make(map[string]struct{})
+	for _, value := range input {
+		if _, exists := seen[value]; !exists {
+			deduped = append(deduped, value)
+			seen[value] = struct{}{}
+		}
+	}
+	return deduped
 }
 
 // extractSkylinks is a helper function that extracts all skylinks (as strings)
@@ -338,21 +412,29 @@ func extractSkylinks(input []byte) []string {
 	return dedupe(skylinks)
 }
 
-// dedupe is a helper function that deduplicates the given input slice
-func dedupe(input []string) []string {
-	if len(input) == 0 {
-		return input
-	}
+// extractSkyTransferURLs is a helper function that extracts all skytransfer
+// URLs from the given byte slice.
+func extractSkyTransferURLs(input []byte, logger *logrus.Logger) []string {
+	var skyTransferURLs []string
 
-	var deduped []string
-	seen := make(map[string]struct{})
-	for _, value := range input {
-		if _, exists := seen[value]; !exists {
-			deduped = append(deduped, value)
-			seen[value] = struct{}{}
+	// range over the string line by line and extract potential skylinks
+	sc := bufio.NewScanner(bytes.NewBuffer(input))
+	for sc.Scan() {
+		{
+			for _, matches := range extractSkytransferURL.FindAllStringSubmatch(sc.Text(), -1) {
+				for _, match := range matches {
+					_, err := url.ParseRequestURI(match)
+					if err != nil {
+						logger.Debugf("matched skytransfer URL '%v' but was invalid, err '%v'", match, err)
+						continue
+					}
+					skyTransferURLs = append(skyTransferURLs, match)
+				}
+			}
 		}
 	}
-	return deduped
+
+	return dedupe(skyTransferURLs)
 }
 
 // extract tags is a helper function that extracts a set of tags from the given
@@ -409,6 +491,102 @@ func extractTextFromHTML(r io.Reader) (string, error) {
 	}
 
 	return strings.Join(text, ""), nil
+}
+
+// extractPortalFromHnsDomain is a helper function that extracts the portal from
+// a hns subdomain
+func extractPortalFromHnsDomain(url string) string {
+	matches := extractPortalURL.FindStringSubmatch(url)
+	if len(matches) != 2 {
+		return ""
+	}
+	return matches[1]
+}
+
+// resolveSkyTransferURLs takes a set of skytransfer URLs and attempts to
+// resolve them to the underlying skylink
+func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, error) {
+	// prepare a tmp dir
+	dir, err := ioutil.TempDir("", "skytransfer-resolve-")
+	if err != nil {
+		return nil, errors.AddContext(err, "could not create temporary directory")
+	}
+	defer os.RemoveAll(dir)
+
+	// write cypress config to disk
+	err = writeCypressConfig(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	// write cypress tests to disk
+	err = writeCypressTests(dir, urls, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0")
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	// run cypress
+	err = cmd.Run()
+	if err != nil {
+		return nil, fmt.Errorf("failed running cypress tests, err %v, stderr %v", err, stderr.String())
+	}
+
+	// extract the skylinks from the output
+	return extractSkylinks(out.Bytes()), nil
+}
+
+// writeCypressConfig writes the required cypress configuration to the given directory
+func writeCypressConfig(dir string) error {
+	err := os.WriteFile(filepath.Join(dir, "cypress.config.js"), []byte(cypressConfig), defaultFilePerm)
+	return errors.AddContext(err, "could not write cypress config file")
+}
+
+// writeCypressTests generates the cypress tests for given URLs and writes them
+// to the appropriate test file location in the given dir
+func writeCypressTests(dir string, urls []string, logger *logrus.Logger) error {
+	// build the tests
+	var sb strings.Builder
+	sb.WriteString("describe('SkyTransfer URL Resolver', () => {\n")
+
+	before := sb.Len()
+	for _, url := range urls {
+		portal := extractPortalFromHnsDomain(url)
+		if portal == "" {
+			logger.Errorf("could not extract portal from url '%v'", url)
+			continue
+		}
+
+		sb.WriteString(fmt.Sprintf("  it('Resolves skylink for %v', () => {\n", url))
+		sb.WriteString(fmt.Sprintf("    cy.visit('%v');\n", url))
+		sb.WriteString(fmt.Sprintf("    cy.intercept('https://%v/*').as('myReq');\n", portal))
+		sb.WriteString("    cy.get('.ant-btn').contains('Download all files').click();\n")
+		sb.WriteString("    cy.wait('@myReq').should(($obj) => {cy.task('log', $obj.request.url)});\n")
+		sb.WriteString("    cy.wait(30000);\n")
+		sb.WriteString("  })\n")
+	}
+
+	// check whether tests have been added
+	if sb.Len() == before {
+		return fmt.Errorf("no cypress tests generated for URLs %v", urls)
+	}
+	sb.WriteString("})\n")
+
+	// prepare the directory
+	integrationDir := filepath.Join(dir, "cypress", "integration")
+	err := os.MkdirAll(integrationDir, defaultDirPerm)
+	if err != nil {
+		return err
+	}
+
+	// write the tests
+	err = os.WriteFile(filepath.Join(integrationDir, "test.cy.js"), []byte(sb.String()), defaultFilePerm)
+	return errors.AddContext(err, "could not write cypress tests file")
 }
 
 // shouldParseMediaType is a helper function that returns true if the given
