@@ -525,7 +525,7 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 		return nil, err
 	}
 
-	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0")
+	cmd := exec.Command("docker", "run", "--privileged", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0")
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
