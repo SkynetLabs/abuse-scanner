@@ -4,6 +4,7 @@ import (
 	"abuse-scanner/accounts"
 	"abuse-scanner/database"
 	"abuse-scanner/email"
+	"abuse-scanner/utils"
 	"fmt"
 	"os/signal"
 	"strconv"
@@ -31,7 +32,7 @@ func main() {
 	abuseLoglevel := os.Getenv("ABUSE_LOG_LEVEL")
 	abuseMailaddress := os.Getenv("ABUSE_MAILADDRESS")
 	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
-	abusePortalURL := sanitizePortalURL(os.Getenv("ABUSE_PORTAL_URL"))
+	abusePortalURL := utils.SanitizeURL(os.Getenv("ABUSE_PORTAL_URL"))
 	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
 	accountsHost := os.Getenv("SKYNET_ACCOUNTS_HOST")
 	accountsPort := os.Getenv("SKYNET_ACCOUNTS_PORT")
@@ -220,19 +221,4 @@ func loadEmailCredentials() (email.Credentials, error) {
 		return email.Credentials{}, errors.New("missing env var 'EMAIL_PASSWORD'")
 	}
 	return creds, nil
-}
-
-// sanitizePortalURL is a helper function that sanitizes the given input portal
-// URL, stripping away trailing slashes and ensuring it's prefixed with https.
-func sanitizePortalURL(portalURL string) string {
-	portalURL = strings.TrimSpace(portalURL)
-	portalURL = strings.TrimSuffix(portalURL, "/")
-	if strings.HasPrefix(portalURL, "https://") {
-		return portalURL
-	}
-	portalURL = strings.TrimPrefix(portalURL, "http://")
-	if portalURL == "" {
-		return portalURL
-	}
-	return fmt.Sprintf("https://%s", portalURL)
 }

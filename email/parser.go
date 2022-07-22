@@ -2,6 +2,7 @@ package email
 
 import (
 	"abuse-scanner/database"
+	"abuse-scanner/utils"
 	"bufio"
 	"bytes"
 	"context"
@@ -70,7 +71,7 @@ var (
 	extractSkylink32RE = regexp.MustCompile(`.+?://.*?([a-zA-Z0-9-_]{55})`)
 
 	// extractSkytransferURL is a regex that is capable of extracting skytransfer URLs
-	extractSkytransferURL = regexp.MustCompile(`^.*(https://skytransfer.hns.*/.*)$`)
+	extractSkytransferURL = regexp.MustCompile(`^.*((?:https://)?skytransfer.hns.*/.*)$`)
 
 	// extractPortalURL is a regex that is capable of extracting the portal from
 	// an hns URL
@@ -292,7 +293,6 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 			if !shouldParseMediaType(t) {
 				continue
 			}
-
 			switch t {
 			case "text/html":
 				// extract all text from the HTML
@@ -423,16 +423,15 @@ func extractSkyTransferURLs(input []byte, logger *logrus.Logger) []string {
 	// range over the string line by line and extract potential skylinks
 	sc := bufio.NewScanner(bytes.NewBuffer(input))
 	for sc.Scan() {
-		{
-			for _, matches := range extractSkytransferURL.FindAllStringSubmatch(sc.Text(), -1) {
-				for _, match := range matches {
-					_, err := url.ParseRequestURI(match)
-					if err != nil {
-						logger.Debugf("matched skytransfer URL '%v' but was invalid, err '%v'", match, err)
-						continue
-					}
-					skyTransferURLs = append(skyTransferURLs, match)
+		for _, matches := range extractSkytransferURL.FindAllStringSubmatch(sc.Text(), -1) {
+			for _, match := range matches {
+				match = utils.SanitizeURL(match)
+				_, err := url.ParseRequestURI(match)
+				if err != nil {
+					logger.Debugf("matched skytransfer URL '%v' but was invalid, err '%v'", match, err)
+					continue
 				}
+				skyTransferURLs = append(skyTransferURLs, match)
 			}
 		}
 	}
