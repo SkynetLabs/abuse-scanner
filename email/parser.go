@@ -34,7 +34,7 @@ const (
 const { defineConfig } = require('cypress')
 module.exports = defineConfig({
 	e2e: {
-		defaultCommandTimeout: 15000,
+		defaultCommandTimeout: 5000,
 		setupNodeEvents(on, config) {
 			on('task', {
 				log(message) {
@@ -71,7 +71,7 @@ var (
 	extractSkylink32RE = regexp.MustCompile(`.+?://.*?([a-zA-Z0-9-_]{55})`)
 
 	// extractSkytransferURL is a regex that is capable of extracting skytransfer URLs
-	extractSkytransferURL = regexp.MustCompile(`^.*((?:https://)?skytransfer.hns.*/.*)$`)
+	extractSkytransferURL = regexp.MustCompile(`^.*((?:https://)?skytransfer.hns.*/.*?(\s|$))`)
 
 	// extractPortalURL is a regex that is capable of extracting the portal from
 	// an hns URL
@@ -306,7 +306,7 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 				skylinks = append(skylinks, extractSkylinks([]byte(text))...)
 
 				// extract all skytransfer URLs from the HTML
-				skytransferURLs = append(skytransferURLs, extractSkyTransferURLs([]byte(text), logger.Logger)...)
+				skytransferURLs = dedupe(append(skytransferURLs, extractSkyTransferURLs([]byte(text), logger.Logger)...))
 
 				// extract all tags from the HTML
 				tags = append(tags, extractTags([]byte(text))...)
@@ -321,7 +321,7 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 				skylinks = append(skylinks, extractSkylinks(body)...)
 
 				// extract all skytransfer URLs from the HTML
-				skytransferURLs = append(skytransferURLs, extractSkyTransferURLs(body, logger.Logger)...)
+				skytransferURLs = dedupe(append(skytransferURLs, extractSkyTransferURLs(body, logger.Logger)...))
 
 				// extract all tags from the email body
 				tags = append(tags, extractTags(body)...)
@@ -329,7 +329,7 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 		}
 	} else {
 		skylinks = extractSkylinks(body)
-		skytransferURLs = append(skytransferURLs, extractSkyTransferURLs(body, logger.Logger)...)
+		skytransferURLs = dedupe(append(skytransferURLs, extractSkyTransferURLs(body, logger.Logger)...))
 		tags = extractTags(body)
 	}
 
@@ -528,7 +528,7 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 		return nil, err
 	}
 
-	cmd := exec.Command("docker", "run", "--privileged", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0")
+	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0")
 	logger.Info("CMD: ", cmd.String())
 	var out bytes.Buffer
 	var stderr bytes.Buffer
@@ -538,7 +538,8 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 	// run cypress
 	err = cmd.Run()
 	if err != nil {
-		return nil, fmt.Errorf("failed running cypress tests, err %v, stderr %v", err, stderr.String())
+		fmt.Println("ERROR", err, out.String(), stderr.String())
+		return nil, fmt.Errorf("failed running cypress tests, err %v, stderr %v, stdout %v", err, stderr.String(), out.String())
 	}
 
 	// extract the skylinks from the output
@@ -567,6 +568,8 @@ func writeCypressTests(dir string, urls []string, logger *logrus.Logger) error {
 		}
 
 		sb.WriteString(fmt.Sprintf("  it('Resolves skylink for %v', () => {\n", url))
+		sb.WriteString("    cy.on('uncaught:exception', (err, runnable) => {return false});\n")
+		sb.WriteString("    cy.on('fail', (e) => {return});\n")
 		sb.WriteString(fmt.Sprintf("    cy.visit('%v');\n", url))
 		sb.WriteString(fmt.Sprintf("    cy.intercept('https://%v/*').as('myReq');\n", portal))
 		sb.WriteString("    cy.get('.ant-btn').contains('Download all files').click();\n")
