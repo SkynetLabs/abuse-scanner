@@ -340,7 +340,6 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 
 	// if we have found skytransfer URLs, resolve them to skylinks
 	if len(skytransferURLs) > 0 {
-		logger.Info("FOUND SKYTRANSFER URLS", len(skytransferURLs))
 		resolvedSkylinks, err := resolveSkyTransferURLs(skytransferURLs, logger.Logger)
 		if err != nil {
 			fmt.Println(err)
@@ -508,12 +507,15 @@ func extractPortalFromHnsDomain(url string) string {
 // resolveSkyTransferURLs takes a set of skytransfer URLs and attempts to
 // resolve them to the underlying skylink
 func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, error) {
+	logger.Debugf("resolving %v skytransfer.hns URLs\n", len(urls))
+
 	// prepare a tmp dir
 	dir, err := ioutil.TempDir("", "skytransfer-resolve-")
 	if err != nil {
 		return nil, errors.AddContext(err, "could not create temporary directory")
 	}
-	logger.Info("TMP DIR", dir)
+
+	logger.Debugf("generating tmp direcotry %v\n", dir)
 	// defer os.RemoveAll(dir)
 
 	// write cypress config to disk
@@ -529,7 +531,7 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 	}
 
 	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0")
-	logger.Info("CMD: ", cmd.String())
+	logger.Debugf("executing cmd %v\n", cmd.String())
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -538,9 +540,12 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 	// run cypress
 	err = cmd.Run()
 	if err != nil {
-		fmt.Println("ERROR", err, out.String(), stderr.String())
-		return nil, fmt.Errorf("failed running cypress tests, err %v, stderr %v, stdout %v", err, stderr.String(), out.String())
+		msg := fmt.Sprintf("failed running cypress tests, err %v, stderr %v, stdout %v", err, stderr.String(), out.String())
+		logger.Debugf(msg)
+		return nil, errors.New(msg)
 	}
+
+	logger.Debugf("cmd output %v\n", out.String())
 
 	// extract the skylinks from the output
 	return extractSkylinks(out.Bytes()), nil
