@@ -760,6 +760,8 @@ func testWriteCypressTests(t *testing.T) {
 	}
 	expected := `describe('SkyTransfer URL Resolver', () => {
   it('Resolves skylink for https://skytransfer.hns.siasky.net/#/v2/d871327/12a75f63', () => {
+    cy.on('uncaught:exception', (err, runnable) => {return false});
+    cy.on('fail', (e) => {return});
     cy.visit('https://skytransfer.hns.siasky.net/#/v2/d871327/12a75f63');
     cy.intercept('https://siasky.net/*').as('myReq');
     cy.get('.ant-btn').contains('Download all files').click();
@@ -767,6 +769,8 @@ func testWriteCypressTests(t *testing.T) {
     cy.wait(30000);
   })
   it('Resolves skylink for https://skytransfer.hns.siasky.net/#/v2/12a75f63/d871327', () => {
+    cy.on('uncaught:exception', (err, runnable) => {return false});
+    cy.on('fail', (e) => {return});
     cy.visit('https://skytransfer.hns.siasky.net/#/v2/12a75f63/d871327');
     cy.intercept('https://siasky.net/*').as('myReq');
     cy.get('.ant-btn').contains('Download all files').click();
