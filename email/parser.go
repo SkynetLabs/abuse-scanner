@@ -340,6 +340,7 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 
 	// if we have found skytransfer URLs, resolve them to skylinks
 	if len(skytransferURLs) > 0 {
+		logger.Info("FOUND SKYTRANSFER URLS", len(skytransferURLs))
 		resolvedSkylinks, err := resolveSkyTransferURLs(skytransferURLs, logger.Logger)
 		if err != nil {
 			fmt.Println(err)
@@ -347,6 +348,8 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 		} else {
 			skylinks = append(skylinks, resolvedSkylinks...)
 		}
+	} else {
+		logger.Info("NO SKYTRANSFER URLS FOUND")
 	}
 
 	return dedupe(skylinks), dedupe(tags), nil
@@ -511,7 +514,8 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 	if err != nil {
 		return nil, errors.AddContext(err, "could not create temporary directory")
 	}
-	defer os.RemoveAll(dir)
+	logger.Info("TMP DIR", dir)
+	// defer os.RemoveAll(dir)
 
 	// write cypress config to disk
 	err = writeCypressConfig(dir)
@@ -526,6 +530,7 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 	}
 
 	cmd := exec.Command("docker", "run", "--privileged", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0")
+	logger.Info("CMD: ", cmd.String())
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
