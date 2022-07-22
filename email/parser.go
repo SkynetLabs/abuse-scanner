@@ -515,8 +515,8 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 		return nil, errors.AddContext(err, "could not create temporary directory")
 	}
 
-	logger.Debugf("generating tmp direcotry %v\n", dir)
-	// defer os.RemoveAll(dir)
+	logger.Debugf("generating tmp directory %v", dir)
+	defer os.RemoveAll(dir)
 
 	// write cypress config to disk
 	err = writeCypressConfig(dir)
@@ -530,8 +530,8 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 		return nil, err
 	}
 
-	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0")
-	logger.Debugf("executing cmd %v\n", cmd.String())
+	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("~/skynet-webportal/docker/data/abuse-scanner/%v:/e2e", filepath.Base(dir)), "-w", "/e2e", "cypress/included:10.3.0")
+	logger.Debugf("executing cmd %v", cmd.String())
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -544,8 +544,6 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 		logger.Debugf(msg)
 		return nil, errors.New(msg)
 	}
-
-	logger.Debugf("cmd output %v\n", out.String())
 
 	// extract the skylinks from the output
 	return extractSkylinks(out.Bytes()), nil
