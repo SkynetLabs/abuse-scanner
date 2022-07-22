@@ -9,7 +9,7 @@ COPY . .
 
 RUN go mod download && make release
 
-FROM alpine:3.15.4
+FROM docker:dind
 LABEL maintainer="SkynetLabs <devs@skynetlabs.com>"
 
 COPY --from=builder /go/bin/abuse-scanner /usr/bin/abuse-scanner
