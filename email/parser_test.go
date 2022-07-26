@@ -285,7 +285,7 @@ func testExtractSkylinks(t *testing.T) {
 
 	hxxps:// [.] eu-ger-1 [.] siasky [.] net / 1005m6ki628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr1o
 
-	hxxps:// [.] eu-ger-1 [.] siasky [.] net2005m6ki628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr2b
+	hxxps:// [.] eu-ger-1 [.] siasky [.] net2005m6KI628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr2b
 
 	3005m6ki628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr2b
 	`))
