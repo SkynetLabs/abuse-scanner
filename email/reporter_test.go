@@ -153,7 +153,7 @@ func testReporter(t *testing.T) {
 	// create a reporter
 	accountsMock := mockAccountsClient{}
 	reporter := newTestReporter()
-	r := NewReporter(abuseDB, accountsMock, creds, "https://siasky.net", reporter, logger)
+	r := NewReporter(abuseDB, accountsMock, creds, "https://siasky.net", "eu-pol-2.siasky.net", reporter, logger)
 
 	// insert an email to report
 	insertedAt := time.Now().UTC()
@@ -220,7 +220,7 @@ func testReporter(t *testing.T) {
 	}
 
 	// assert there's no unfiled reports left in a retry
-	err = build.Retry(100, 100*time.Millisecond, func() error {
+	err = build.Retry(30, time.Second, func() error {
 		unfiled, err := abuseDB.FindUnfiledReports()
 		if err != nil {
 			t.Fatal(err)
@@ -246,6 +246,9 @@ func testReporter(t *testing.T) {
 	}
 	if reported.ReportedAt == (time.Time{}) {
 		t.Fatal("unexpected reported at", reported.ReportedAt)
+	}
+	if reported.ReportedBy != "eu-pol-2.siasky.net" {
+		t.Fatal("unexpected reported by field", reported.ReportedBy)
 	}
 
 	// draft the 3 reports we expect

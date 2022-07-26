@@ -18,8 +18,16 @@ func TestAbuseEmail(t *testing.T) {
 		test func(t *testing.T)
 	}{
 		{
+			name: "Sender",
+			test: testSender,
+		},
+		{
 			name: "String",
 			test: testString,
+		},
+		{
+			name: "Success",
+			test: testSuccess,
 		},
 		{
 			name: "Template",
@@ -28,6 +36,34 @@ func TestAbuseEmail(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, test.test)
+	}
+}
+
+// testSender is a small unit test that covers the Sender method
+func testSender(t *testing.T) {
+	email := AbuseEmail{}
+
+	// base case
+	if email.ReplyToEmail() != "" {
+		t.Fatal("unexpected sender", email.ReplyToEmail())
+	}
+
+	// from filled
+	email.From = "abuse@siasky.net"
+	if email.ReplyToEmail() != "abuse@siasky.net" {
+		t.Fatal("unexpected sender", email.ReplyToEmail())
+	}
+
+	// reply-to filled
+	email.ReplyTo = "john.doe@examle.com"
+	if email.ReplyToEmail() != "john.doe@examle.com" {
+		t.Fatal("unexpected sender", email.ReplyToEmail())
+	}
+
+	// only reply to filled
+	email.From = ""
+	if email.ReplyToEmail() != "john.doe@examle.com" {
+		t.Fatal("unexpected sender", email.ReplyToEmail())
 	}
 }
 
@@ -121,6 +157,48 @@ Thank you for your report.
 	}
 }
 
+// testSuccess is a small unit test that verifies the Success method
+func testSuccess(t *testing.T) {
+	// base case
+	email := AbuseEmail{Parsed: true, Blocked: true}
+	if email.Success() {
+		t.Fatal("unexpected result")
+	}
+
+	// empty case
+	email.ParseResult = AbuseReport{Skylinks: nil}
+	email.BlockResult = nil
+	if email.Success() {
+		t.Fatal("unexpected result")
+	}
+
+	// single not blocked case
+	email.ParseResult.Skylinks = []string{"BAEE7l0IkIVcVEHDgRCcNkRYS8keZKr9v_ffxf9_614m6g"}
+	email.BlockResult = []string{AbuseStatusNotBlocked}
+	if email.Success() {
+		t.Fatal("unexpected result")
+	}
+
+	// double, only one blocked case
+	email.ParseResult.Skylinks = []string{
+		"BAEE7l0IkIVcVEHDgRCcNkRYS8keZKr9v_ffxf9_614m6g",
+		"CAEE7l0IkIVcVEHDgRCcNkRYS8keZKr9v_ffxf9_614m7h",
+	}
+	email.BlockResult = []string{
+		AbuseStatusNotBlocked,
+		AbuseStatusBlocked,
+	}
+	if email.Success() {
+		t.Fatal("unexpected result")
+	}
+
+	// success case
+	email.BlockResult[0] = AbuseStatusBlocked
+	if !email.Success() {
+		t.Fatal("unexpected result")
+	}
+}
+
 // testTemplate verifies the implementation of the response template method on
 // the abuse email
 func testTemplate(t *testing.T) {
@@ -163,7 +241,7 @@ Thank you for your report.
 
 `
 	// assert it's identical
-	actual := email.response()
+	actual := email.Response()
 	if actual != expected {
 		t.Fatal(diff.LineDiff(expected, actual))
 	}
@@ -187,7 +265,7 @@ Thank you for your report.
 `, blockedAt.Format(time.RFC1123))
 
 	// assert it's identical
-	actual = email.response()
+	actual = email.Response()
 	if actual != expected {
 		t.Fatal("\n" + diff.LineDiff(expected, actual))
 	}
@@ -215,7 +293,7 @@ Thank you for your report.
 `, blockedAt.Format(time.RFC1123))
 
 	// assert it's identical
-	actual = email.response()
+	actual = email.Response()
 	if actual != expected {
 		t.Fatal(diff.LineDiff(expected, actual))
 	}
