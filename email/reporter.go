@@ -55,13 +55,14 @@ type (
 		staticLogger         *logrus.Entry
 		staticPortalURL      string
 		staticReporter       NCMECReporter
+		staticServerDomain   string
 		staticStopChan       chan struct{}
 		staticWaitGroup      sync.WaitGroup
 	}
 )
 
 // NewReporter creates a new reporter.
-func NewReporter(abuseDB *database.AbuseScannerDB, accountsClient accounts.AccountsAPI, creds NCMECCredentials, portalURL string, reporter NCMECReporter, logger *logrus.Logger) *Reporter {
+func NewReporter(abuseDB *database.AbuseScannerDB, accountsClient accounts.AccountsAPI, creds NCMECCredentials, portalURL, serverDomain string, reporter NCMECReporter, logger *logrus.Logger) *Reporter {
 	return &Reporter{
 		staticAbuseDatabase:  abuseDB,
 		staticAccountsClient: accountsClient,
@@ -70,6 +71,7 @@ func NewReporter(abuseDB *database.AbuseScannerDB, accountsClient accounts.Accou
 		staticLogger:         logger.WithField("module", "Reporter"),
 		staticPortalURL:      portalURL,
 		staticReporter:       reporter,
+		staticServerDomain:   serverDomain,
 		staticStopChan:       make(chan struct{}),
 	}
 }
@@ -220,6 +222,7 @@ func (r *Reporter) buildReportsForEmail(email database.AbuseEmail) error {
 	err = abuseDB.UpdateNoLock(email, bson.M{
 		"$set": bson.M{
 			"reported":    true,
+			"reported_by": r.staticServerDomain,
 			"reported_at": time.Now().UTC(),
 		},
 	})

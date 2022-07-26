@@ -292,6 +292,11 @@ func (f *Fetcher) getMessagesToFetch(mailbox *imap.MailboxStatus, msgs []uint32)
 
 // persistMessage will persist the given message in the abuse scanner database
 func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message, section *imap.BodySectionName) error {
+	// sanity check parameters
+	if mailbox == nil || msg == nil || section == nil {
+		return errors.New("missing input parameters")
+	}
+
 	// convenience variables
 	abuseDB := f.staticDatabase
 
@@ -313,26 +318,18 @@ func (f *Fetcher) persistMessage(mailbox *imap.MailboxStatus, msg *imap.Message,
 		return errors.AddContext(err, "could not read msg body")
 	}
 
-	// parse the 'from', we evaluate the reply-to first because 'abuse@' emails
-	// are forwarded to our mailbox and the original sender is in the reply-to
-	// field, while the from field holds 'abuse@', so we lose the original
-	// context
-	from := "unknown"
-	if len(msg.Envelope.ReplyTo) > 0 {
-		from = msg.Envelope.ReplyTo[0].Address()
-	} else if len(msg.Envelope.From) > 0 {
-		from = msg.Envelope.From[0].Address()
-	}
-
 	// create the email entity from the message
 	email := database.AbuseEmail{
 		ID:        primitive.NewObjectID(),
 		UID:       uid,
 		UIDRaw:    msg.Uid,
 		Body:      body,
-		From:      from,
 		Subject:   msg.Envelope.Subject,
 		MessageID: msg.Envelope.MessageId,
+
+		From:    extractField("From", msg.Envelope),
+		ReplyTo: extractField("ReplyTo", msg.Envelope),
+		To:      extractField("To", msg.Envelope),
 
 		Parsed:    false,
 		Blocked:   false,
@@ -415,8 +412,32 @@ func hasBody(msg *imap.Message) bool {
 		return false
 	}
 	bodyLit := msg.GetBody(sectionName)
-	if bodyLit == nil {
-		return false
+	return bodyLit != nil
+}
+
+// extractField is a small helper function that takes an envelope and tries to
+// extract the requested field, if the field is not found, or if it is empty, an
+// empty string is returned
+func extractField(field string, envelope *imap.Envelope) string {
+	if envelope == nil {
+		return ""
 	}
-	return true
+
+	switch field {
+	case "From":
+		if len(envelope.From) > 0 {
+			return envelope.From[0].Address()
+		}
+	case "To":
+		if len(envelope.To) > 0 {
+			return envelope.To[0].Address()
+		}
+	case "ReplyTo":
+		if len(envelope.ReplyTo) > 0 {
+			return envelope.ReplyTo[0].Address()
+		}
+	default:
+	}
+
+	return ""
 }
