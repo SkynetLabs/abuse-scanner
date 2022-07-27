@@ -504,6 +504,24 @@ func extractPortalFromHnsDomain(url string) string {
 	return matches[1]
 }
 
+func tmpcmd(logger *logrus.Logger) {
+	cmd := exec.Command("ls", "/tmp")
+	logger.Debugf("executing cmd %v", cmd.String())
+
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	// run cypress
+	err := cmd.Run()
+	if err != nil {
+		msg := fmt.Sprintf("failed running cypress tests, err %v, stderr %v, stdout %v", err, stderr.String(), out.String())
+		logger.Debugf(msg)
+	}
+	logger.Debugf("OUTPUT:", out.String())
+}
+
 // resolveSkyTransferURLs takes a set of skytransfer URLs and attempts to
 // resolve them to the underlying skylink
 func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, error) {
@@ -530,7 +548,9 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 		return nil, err
 	}
 
-	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("%v:/e2e", filepath.Base(dir)), "-w", "/e2e", "cypress/included:10.3.0")
+	tmpcmd(logger)
+
+	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0")
 	logger.Debugf("executing cmd %v", cmd.String())
 	var out bytes.Buffer
 	var stderr bytes.Buffer
