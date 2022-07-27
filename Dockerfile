@@ -1,4 +1,4 @@
-FROM golang:1.18.2 as builder
+FROM golang:1.18.3 as builder
 LABEL maintainer="SkynetLabs <devs@skynetlabs.com>"
 
 WORKDIR /root
@@ -9,7 +9,7 @@ COPY . .
 
 RUN go mod download && make release
 
-FROM alpine:3.16.0
+FROM alpine:3.16.1
 LABEL maintainer="SkynetLabs <devs@skynetlabs.com>"
 
 COPY --from=builder /go/bin/abuse-scanner /usr/bin/abuse-scanner
