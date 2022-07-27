@@ -2,7 +2,6 @@ package email
 
 import (
 	"abuse-scanner/database"
-	"abuse-scanner/test"
 	"context"
 	"io/ioutil"
 	"os"
@@ -194,7 +193,7 @@ func testParseBody(t *testing.T) {
 	logger.Out = ioutil.Discard
 
 	// parse our example body with multipart content
-	skylinks, tags, err := parseBody([]byte(contentTypeBody), test.TmpDir, logger.WithField("module", "Parser"))
+	skylinks, tags, err := parseBody([]byte(contentTypeBody), os.TempDir(), logger.WithField("module", "Parser"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +214,7 @@ func testParseBody(t *testing.T) {
 	}
 
 	// parse our example body for unknown charsets
-	skylinks, tags, err = parseBody([]byte(unknownCharsetBody), test.TmpDir, logger.WithField("module", "Parser"))
+	skylinks, tags, err = parseBody([]byte(unknownCharsetBody), os.TempDir(), logger.WithField("module", "Parser"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +235,7 @@ func testParseBody(t *testing.T) {
 	}
 
 	// parse our example body containing skytransfer links
-	skylinks, tags, err = parseBody([]byte(exampleSkyTransferBody), test.TmpDir, logger.WithField("module", "Parser"))
+	skylinks, tags, err = parseBody([]byte(exampleSkyTransferBody), os.TempDir(), logger.WithField("module", "Parser"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +526,7 @@ func testBuildAbuseReport(t *testing.T) {
 
 	// create a parser
 	domain := "dev.siasky.net"
-	parser := NewParser(ctx, db, domain, "somesponsor", test.TmpDir, logger)
+	parser := NewParser(ctx, db, domain, "somesponsor", os.TempDir(), logger)
 
 	// create an abuse email
 	email := database.AbuseEmail{
