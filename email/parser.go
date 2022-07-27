@@ -90,18 +90,20 @@ type (
 		staticLogger       *logrus.Entry
 		staticServerDomain string
 		staticSponsor      string
+		staticTmpDir       string
 		staticWaitGroup    sync.WaitGroup
 	}
 )
 
 // NewParser creates a new parser.
-func NewParser(ctx context.Context, database *database.AbuseScannerDB, serverDomain, sponsor string, logger *logrus.Logger) *Parser {
+func NewParser(ctx context.Context, database *database.AbuseScannerDB, serverDomain, sponsor, tmpDir string, logger *logrus.Logger) *Parser {
 	return &Parser{
 		staticContext:      ctx,
 		staticDatabase:     database,
 		staticLogger:       logger.WithField("module", "Parser"),
 		staticServerDomain: serverDomain,
 		staticSponsor:      sponsor,
+		staticTmpDir:       tmpDir,
 	}
 }
 
@@ -148,7 +150,7 @@ func (p *Parser) buildAbuseReport(email database.AbuseEmail) (database.AbuseRepo
 	}
 
 	// extract all tags and skylinks
-	skylinks, tags, err := parseBody(body, logger)
+	skylinks, tags, err := parseBody(body, p.staticTmpDir, logger)
 	if err != nil {
 		return database.AbuseReport{}, err
 	}
@@ -265,7 +267,7 @@ func (p *Parser) threadedParseMessages() {
 
 // parseBody is a helper function that parses the given body bytes, extracted
 // as a standalone function for unit testing purposes
-func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
+func parseBody(body []byte, tmpDir string, logger *logrus.Entry) ([]string, []string, error) {
 	// use the message library to parse the email
 	msg, err := message.Read(bytes.NewBuffer(body))
 	if err != nil {
@@ -340,7 +342,7 @@ func parseBody(body []byte, logger *logrus.Entry) ([]string, []string, error) {
 
 	// if we have found skytransfer URLs, resolve them to skylinks
 	if len(skytransferURLs) > 0 {
-		resolvedSkylinks, err := resolveSkyTransferURLs(skytransferURLs, logger.Logger)
+		resolvedSkylinks, err := resolveSkyTransferURLs(skytransferURLs, tmpDir, logger.Logger)
 		if err != nil {
 			fmt.Println(err)
 			logger.Errorf("failed to resolve skytransfer URLs, err %v", err)
@@ -506,11 +508,11 @@ func extractPortalFromHnsDomain(url string) string {
 
 // resolveSkyTransferURLs takes a set of skytransfer URLs and attempts to
 // resolve them to the underlying skylink
-func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, error) {
+func resolveSkyTransferURLs(urls []string, tmpDir string, logger *logrus.Logger) ([]string, error) {
 	logger.Debugf("resolving %v skytransfer.hns URLs\n", len(urls))
 
 	// prepare a tmp dir
-	dir, err := ioutil.TempDir("", "skytransfer-resolve-")
+	dir, err := ioutil.TempDir(tmpDir, "skytransfer-resolve-")
 	if err != nil {
 		return nil, errors.AddContext(err, "could not create temporary directory")
 	}
@@ -530,7 +532,7 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 		return nil, err
 	}
 
-	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("/tmp/abuse-scanner/%v:/e2e", filepath.Base(dir)), "-w", "/e2e", "cypress/included:10.3.0") //nolint:gosec
+	cmd := exec.Command("docker", "run", "-v", fmt.Sprintf("%v:/e2e", dir), "-w", "/e2e", "cypress/included:10.3.0") //nolint:gosec
 	logger.Debugf("executing cmd %v", cmd.String())
 	var out bytes.Buffer
 	var stderr bytes.Buffer
