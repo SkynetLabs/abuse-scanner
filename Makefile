@@ -71,6 +71,6 @@ test-long: lint start-mongo test-long-ci stop-mongo
 # be initailized separately
 test-long-ci:
 	@mkdir -p cover
-	GORACE='$(racevars)' go test -race --coverprofile='./cover/cover.out' -v -failfast -tags='testing debug netgo' -timeout=60s $(pkgs) -run=$(run) -count=$(count)
+	GORACE='$(racevars)' go test -race --coverprofile='./cover/cover.out' -v -failfast -tags='testing debug netgo' -timeout=10m $(pkgs) -run=$(run) -count=$(count)
 
 .PHONY: all deps fmt vet lint release start-mongo stop-mongo markdown-spellcheck test test-long test-long-ci
