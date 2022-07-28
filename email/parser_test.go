@@ -49,6 +49,9 @@ var (
 	hxxps:// siasky [.] net/CADEnmNNR6arnyDSH60MlGjQK5O3Sv-ecK1PGt3MNmQUhA#apg@franklinbank [.] com
 	hxxps:// siasky [.] net/GABJJhT8AlfNh-XS-6YVH8en7O-t377ej9XS2eclnv2yFg
 
+	https:// siasky [.]netAAAg4mZrsNcedNPazZ4kSFAYBzf7f8ZgHO1Tu1L-NN8Gjg
+	BBBg4mZrsNcedNPazZ4kSFAYBzf7f8ZgHO1Tu1L-NN8Gjg
+
 	As a reminder, phishing is expressly prohibited by our Universal Terms of Service Agreement, paragraph 7. "Acceptable Use Policy (AUP)"
 	`)
 
@@ -360,17 +363,21 @@ func testExtractSkylinks(t *testing.T) {
 
 	// extract skylinks
 	skylinks = extractSkylinks(exampleBody)
-	if len(skylinks) != 4 {
-		t.Fatalf("unexpected amount of skylinks found, %v != 4", len(skylinks))
+	sort.Strings(skylinks)
+	if len(skylinks) != 6 {
+		t.Fatalf("unexpected amount of skylinks found, %v != 6, skylinks %+v", len(skylinks), skylinks)
 	}
 
 	// assert we have extracted the correct skylinks
 	//
 	// NOTE: we didn't discover IGzqsAmjjLJjN3Or8ZFb9AGX4Km12EJu5AVmgaX8HWNy7Q
 	// which could have been a false positive as it's a valid skylink
-	sort.Strings(skylinks)
-	if skylinks[0] != "CADEnmNNR6arnyDSH60MlGjQK5O3Sv-ecK1PGt3MNmQUhA" ||
-		skylinks[1] != "GABJJhT8AlfNh-XS-6YVH8en7O-t377ej9XS2eclnv2yFg" || skylinks[2] != "GAEE7l0IkIVcVEHDgRCcNkRYS8keZKr9v_ffxf9_614m6g" || skylinks[3] != "nAA_hbtNaOYyR2WrM9UNIc5jRu4WfGy5QK_iTGosDgLmSA" {
+	if skylinks[0] != "AAAg4mZrsNcedNPazZ4kSFAYBzf7f8ZgHO1Tu1L-NN8Gjg" ||
+		skylinks[1] != "BBBg4mZrsNcedNPazZ4kSFAYBzf7f8ZgHO1Tu1L-NN8Gjg" ||
+		skylinks[2] != "CADEnmNNR6arnyDSH60MlGjQK5O3Sv-ecK1PGt3MNmQUhA" ||
+		skylinks[3] != "GABJJhT8AlfNh-XS-6YVH8en7O-t377ej9XS2eclnv2yFg" ||
+		skylinks[4] != "GAEE7l0IkIVcVEHDgRCcNkRYS8keZKr9v_ffxf9_614m6g" ||
+		skylinks[5] != "nAA_hbtNaOYyR2WrM9UNIc5jRu4WfGy5QK_iTGosDgLmSA" {
 		t.Fatal("unexpected skylinks", skylinks)
 	}
 
@@ -383,9 +390,13 @@ func testExtractSkylinks(t *testing.T) {
 	hxxps:// 7g01n1fmusamd3k4c5l7ahb39356rfhfs92e9mjshj1vq93vk891m2o [.] siasky [.] net
 
 	hxxps:// [.] eu-ger-1 [.] siasky [.] net / 1005m6ki628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr1o
+
+	hxxps:// [.] eu-ger-1 [.] siasky [.] net2005m6KI628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr2b
+
+	3005m6ki628f5t2o74h1qirph34lcavbn52oj7e2oan533sj3cgbr2b
 	`))
-	if len(skylinks) != 2 {
-		t.Fatalf("unexpected amount of skylinks found, %v != 2", len(skylinks))
+	if len(skylinks) != 4 {
+		t.Fatalf("unexpected amount of skylinks found, %v != 4, skylinks: %v", len(skylinks), skylinks)
 	}
 
 	// NOTE: it will have loaded the base32 encoded version Skylink and output
@@ -582,7 +593,7 @@ func testBuildAbuseReport(t *testing.T) {
 	// since we use the example email body we can rest assured it's correct
 	// since the unit tests cover that as well
 	pr := updated.ParseResult
-	if len(pr.Skylinks) != 4 {
+	if len(pr.Skylinks) != 6 {
 		t.Fatal("unexpected amount of skylinks", pr.Skylinks)
 	}
 	if len(pr.Tags) != 1 {
