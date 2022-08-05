@@ -4,6 +4,7 @@ import (
 	"abuse-scanner/accounts"
 	"abuse-scanner/database"
 	"abuse-scanner/email"
+	"abuse-scanner/utils"
 	"fmt"
 	"os/signal"
 	"strconv"
@@ -31,13 +32,19 @@ func main() {
 	abuseLoglevel := os.Getenv("ABUSE_LOG_LEVEL")
 	abuseMailaddress := os.Getenv("ABUSE_MAILADDRESS")
 	abuseMailbox := os.Getenv("ABUSE_MAILBOX")
-	abusePortalURL := sanitizePortalURL(os.Getenv("ABUSE_PORTAL_URL"))
+	abusePortalURL := utils.SanitizeURL(os.Getenv("ABUSE_PORTAL_URL"))
 	abuseSponsor := os.Getenv("ABUSE_SPONSOR")
+	abuseTmpDir := os.Getenv("ABUSE_TMP_DIR")
 	accountsHost := os.Getenv("SKYNET_ACCOUNTS_HOST")
 	accountsPort := os.Getenv("SKYNET_ACCOUNTS_PORT")
 	blockerHost := os.Getenv("BLOCKER_HOST")
 	blockerPort := os.Getenv("BLOCKER_PORT")
 	serverDomain := os.Getenv("SERVER_DOMAIN")
+
+	// use a default for the abuse directory if it's not set
+	if abuseTmpDir == "" {
+		abuseTmpDir = "/tmp/abuse-scanner"
+	}
 
 	// parse ncmec reporting enabled variable
 	ncmecReportingEnabled := false
@@ -101,7 +108,7 @@ func main() {
 	// create a new mail parser, it parses any email that's not parsed yet for
 	// abuse skylinks and a set of abuse tag
 	logger.Info("Initializing email parser...")
-	parser := email.NewParser(ctx, abuseDB, serverDomain, abuseSponsor, logger)
+	parser := email.NewParser(ctx, abuseDB, serverDomain, abuseSponsor, abuseTmpDir, logger)
 	err = parser.Start()
 	if err != nil {
 		log.Fatal("Failed to start the email parser, err: ", err)
@@ -220,19 +227,4 @@ func loadEmailCredentials() (email.Credentials, error) {
 		return email.Credentials{}, errors.New("missing env var 'EMAIL_PASSWORD'")
 	}
 	return creds, nil
-}
-
-// sanitizePortalURL is a helper function that sanitizes the given input portal
-// URL, stripping away trailing slashes and ensuring it's prefixed with https.
-func sanitizePortalURL(portalURL string) string {
-	portalURL = strings.TrimSpace(portalURL)
-	portalURL = strings.TrimSuffix(portalURL, "/")
-	if strings.HasPrefix(portalURL, "https://") {
-		return portalURL
-	}
-	portalURL = strings.TrimPrefix(portalURL, "http://")
-	if portalURL == "" {
-		return portalURL
-	}
-	return fmt.Sprintf("https://%s", portalURL)
 }
