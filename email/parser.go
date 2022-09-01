@@ -524,6 +524,12 @@ func extractPortalFromHnsDomain(url string) string {
 func resolveSkyTransferURLs(urls []string, tmpDir string, logger *logrus.Logger) ([]string, error) {
 	logger.Debugf("resolving %v skytransfer.hns URLs\n", len(urls))
 
+	// ensure the directory exists
+	err := os.MkdirAll(tmpDir, defaultDirPerm)
+	if err != nil {
+		return nil, errors.AddContext(err, "could not ensure temporary directory exists")
+	}
+
 	// prepare a tmp dir
 	dir, err := ioutil.TempDir(tmpDir, "skytransfer-resolve-")
 	if err != nil {
