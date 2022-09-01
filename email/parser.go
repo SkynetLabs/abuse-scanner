@@ -43,6 +43,7 @@ module.exports = defineConfig({
 				},
 			})
 		},
+		requestTimeout: 15000,
 		screenshotOnRunFailure: false,
 		specPattern: 'cypress/integration/**/*.cy.js',
 		supportFile: false,
