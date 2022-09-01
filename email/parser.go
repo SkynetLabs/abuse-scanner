@@ -564,7 +564,6 @@ func resolveSkyTransferURLs(urls []string, logger *logrus.Logger) ([]string, err
 
 // writeCypressConfig writes the required cypress configuration to the given directory
 func writeCypressConfig(dir string) error {
-	fmt.Println("writing config file", filepath.Join(dir, "cypress.config.js"))
 	err := os.WriteFile(filepath.Join(dir, "cypress.config.js"), []byte(cypressConfig), defaultFilePerm)
 	return errors.AddContext(err, "could not write cypress config file")
 }
