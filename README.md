@@ -42,6 +42,7 @@ accordingly.
 - `ABUSE_NCMEC_REPORTING_ENABLED`
 - `ABUSE_PORTAL_URL`, e.g. `https://siasky.net`
 - `ABUSE_SPONSOR`
+- `ABUSE_TMP_DIR`
 - `SKYNET_ACCOUNTS_HOST`, e.g `accounts`
 - `SKYNET_ACCOUNTS_PORT`, e.g `3000`
 - `BLOCKER_HOST`
